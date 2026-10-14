@@ -94,7 +94,7 @@ pub fn release_preference(c: &Candidate, q: &Query, settings: &Settings, min_yea
     if let (Some(qa), Some(ca)) = (&q.album, &c.fields.album) {
         let s = hints::title_similarity(qa, ca);
         if s > 0.85 {
-            p += 0.6 * s;
+            p += 0.9 * s;
         }
     }
     match c.release_status.as_deref() {
@@ -633,4 +633,90 @@ pub async fn rebuild_with(track: &Track, proposal: &mut Proposal, idx: usize, se
         .cloned()
         .collect();
     finalize(track, proposal, c, &supporting, settings, &q).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cand(album: &str, year: &str, rtype: &str, sec: &[&str], status: &str, dur: f64) -> Candidate {
+        Candidate {
+            source: "MusicBrainz".into(),
+            fields: TagFields {
+                title: Some("Bohemian Rhapsody".into()),
+                artist: Some("Queen".into()),
+                album: Some(album.into()),
+                year: Some(year.into()),
+                ..Default::default()
+            },
+            duration: Some(dur),
+            release_type: Some(rtype.into()),
+            secondary_types: sec.iter().map(|s| s.to_string()).collect(),
+            release_status: Some(status.into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn prefers_original_studio_album() {
+        let settings = Settings::default();
+        let q = Query { title: Some("Bohemian Rhapsody".into()), artist: Some("Queen".into()), duration: 355.0, ..Default::default() };
+        let list = vec![
+            cand("Live at Wembley '86", "1992", "Album", &["Live"], "Official", 360.0),
+            cand("Greatest Hits", "1981", "Album", &["Compilation"], "Official", 355.0),
+            cand("Rock Montreal", "1981", "Album", &["Live"], "Bootleg", 356.0),
+            cand("A Night at the Opera", "1975", "Album", &[], "Official", 355.0),
+            cand("Bohemian Rhapsody", "1975", "Single", &[], "Official", 355.0),
+        ];
+        let best = list
+            .iter()
+            .max_by(|a, b| {
+                let sa = score_candidate(a, &q) * 1.5 + release_preference(a, &q, &settings, Some(1975));
+                let sb = score_candidate(b, &q) * 1.5 + release_preference(b, &q, &settings, Some(1975));
+                sa.partial_cmp(&sb).unwrap()
+            })
+            .unwrap();
+        assert_eq!(best.fields.album.as_deref(), Some("A Night at the Opera"));
+    }
+
+    #[test]
+    fn album_hint_wins_and_versions_penalized() {
+        let settings = Settings::default();
+        let q = Query {
+            title: Some("Bohemian Rhapsody".into()),
+            artist: Some("Queen".into()),
+            album: Some("Greatest Hits".into()),
+            duration: 355.0,
+            ..Default::default()
+        };
+        let a = cand("A Night at the Opera", "1975", "Album", &[], "Official", 355.0);
+        let b = cand("Greatest Hits", "1981", "Album", &["Compilation"], "Official", 355.0);
+        let (pa, pb) = (release_preference(&a, &q, &settings, Some(1975)), release_preference(&b, &q, &settings, Some(1975)));
+        assert!(pb > pa, "hint {pb} vs studio {pa}");
+
+        let mut live = cand("X", "1990", "Album", &[], "Official", 355.0);
+        live.fields.title = Some("Bohemian Rhapsody (Live)".into());
+        let studio = cand("X", "1990", "Album", &[], "Official", 355.0);
+        let (ss, ls) = (score_candidate(&studio, &q), score_candidate(&live, &q));
+        assert!(ss > ls + 0.1, "studio {ss} live {ls}");
+
+        let mut wrong = cand("X", "1990", "Album", &[], "Official", 200.0);
+        wrong.fields.artist = Some("Panic! at the Disco".into());
+        let ws = score_candidate(&wrong, &q);
+        assert!(ws < 0.55, "wrong artist score {ws}");
+    }
+
+    #[test]
+    fn query_from_messy_file() {
+        let t = Track {
+            path: "/m/Downloads/Daft Punk - Get Lucky (Official Audio) ft. Pharrell Williams-5NV6Rdv1a3I.m4a".into(),
+            duration: 369.0,
+            tags: TagFields { title: Some("Track 01".into()), artist: Some("Unknown Artist".into()), ..Default::default() },
+            ..Default::default()
+        };
+        let q = build_query(&t);
+        assert_eq!(q.artist.as_deref(), Some("Daft Punk"));
+        assert_eq!(hints::split_feat(q.title.as_deref().unwrap()).0, "Get Lucky");
+        assert!(!q.from_tags);
+    }
 }

@@ -6,7 +6,7 @@ use lofty::config::WriteOptions;
 use lofty::file::FileType;
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::prelude::*;
-use lofty::tag::{Tag, TagType};
+use lofty::tag::{ItemValue, Tag, TagItem, TagType};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -256,7 +256,12 @@ pub struct WriteRequest {
 fn set_text(tag: &mut Tag, key: ItemKey, v: Option<String>) {
     match v {
         Some(v) => {
-            tag.insert_text(key, v);
+            // Niektóre klucze (np. MusicBrainz w ID3v2 → ramka UFID) nie mają zwykłego
+            // odwzorowania – wtedy wstawiamy je bez sprawdzania.
+            if !tag.insert_text(key.clone(), v.clone()) {
+                tag.remove_key(&key);
+                tag.insert_unchecked(TagItem::new(key, ItemValue::Text(v)));
+            }
         }
         None => tag.remove_key(&key),
     }
@@ -360,12 +365,19 @@ pub fn write(path: &Path, req: &WriteRequest) -> Result<(), String> {
         set_text(tag, ItemKey::Lyrics, lyr.clone().filter(|s| !s.trim().is_empty()));
     }
 
-    let opts = if tag_type == TagType::Id3v2 { WriteOptions::default().use_id3v23(true) } else { WriteOptions::default() };
+    let opts = WriteOptions::default();
     // Pliki tylko do odczytu – zgłaszamy czytelny błąd.
     if std::fs::metadata(path).map(|m| m.permissions().readonly()).unwrap_or(false) {
         return Err("Plik jest tylko do odczytu".into());
     }
-    file.save_to_path(path, opts).map_err(|e| format!("Zapis nie powiódł się: {e}"))?;
+    if tag_type == TagType::Id3v2 {
+        // Natywny zapis ID3v2 – obsługuje też ramki specjalne (np. UFID MusicBrainz).
+        let tag = file.primary_tag().cloned().ok_or("Brak tagu")?;
+        let id3: lofty::id3::v2::Id3v2Tag = tag.into();
+        id3.save_to_path(path, opts).map_err(|e| format!("Zapis nie powiódł się: {e}"))?;
+    } else {
+        file.save_to_path(path, opts).map_err(|e| format!("Zapis nie powiódł się: {e}"))?;
+    }
     Ok(())
 }
 
