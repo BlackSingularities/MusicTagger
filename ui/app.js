@@ -1188,7 +1188,7 @@ function renderReview(v) {
       <button class="btn" id="rv-sel" ${S.reviewSel.size ? '' : 'disabled'}>${icon('check')}${esc(t('applySelected', { n: S.reviewSel.size }))}</button>
       <button class="btn" id="rv-all">${icon('check')}${esc(t('applyAll', { n: list.length }))}</button>
       <button class="btn ghost danger" id="rv-discard">${icon('x')}${esc(t('discardAll'))}</button></div>` : `<div class="empty" style="padding:60px 0">${icon('sparkles', 'xl')}<p>${esc(t('reviewEmpty'))}</p>${S.tracks.length ? `<button class="btn primary" id="rv-start">${icon('sparkles')}${esc(t('smartFix'))}</button>` : ''}</div>`}
-    ${list.map((x) => {
+    ${list.slice(0, S.reviewLimit || 150).map((x) => {
       const p = S.proposals.get(x.id);
       const pct = Math.round(p.confidence * 100);
       const enabled = p.changes.filter((c) => c.enabled);
@@ -1199,8 +1199,10 @@ function renderReview(v) {
         <div class="review-grid">${enabled.slice(0, 9).map((c) => `<div><div class="k">${esc(fieldLabel(c.field))}</div><div class="ellipsis" style="color:var(--ok)">${esc(c.new)}</div></div>`).join('')}
         ${p.coverEnabled ? `<div><div class="k">${esc(t('coverSec'))}</div><div style="color:var(--ok)">${icon('image')} ${esc(p.covers[p.coverChoice || 0]?.source || '')}</div></div>` : ''}
         ${p.lyricsEnabled ? `<div><div class="k">${esc(t('lyricsSec'))}</div><div style="color:var(--ok)">${icon('lyrics')} ${esc(p.lyrics?.synced ? t('synced') : t('plain'))}</div></div>` : ''}</div></div>`;
-    }).join('')}</div>`;
+    }).join('')}
+    ${list.length > (S.reviewLimit || 150) ? `<div class="row" style="justify-content:center"><button class="btn" id="rv-more">${esc(t('showMore', { n: list.length - (S.reviewLimit || 150) }))}</button></div>` : ''}</div>`;
   const ids = list.map((x) => x.id);
+  $('#rv-more') && ($('#rv-more').onclick = () => { S.reviewLimit = (S.reviewLimit || 150) + 300; renderView(); });
   $('#rv-sure') && ($('#rv-sure').onclick = () => applyIds(sure.map((x) => x.id)));
   $('#rv-all') && ($('#rv-all').onclick = () => applyIds(ids));
   $('#rv-sel') && ($('#rv-sel').onclick = () => applyIds([...S.reviewSel]));
