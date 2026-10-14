@@ -25,6 +25,30 @@ pub fn is_audio(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Parsuje tekst LRC do listy (czas w ms, linia).
+pub fn parse_lrc(text: &str) -> Vec<(u32, String)> {
+    static TS: Lazy<Regex> = Lazy::new(|| Regex::new(r"\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]").unwrap());
+    let mut out = vec![];
+    for line in text.lines() {
+        let words = TS.replace_all(line, "").trim().to_string();
+        for c in TS.captures_iter(line) {
+            let m: u32 = c[1].parse().unwrap_or(0);
+            let sec: u32 = c[2].parse().unwrap_or(0);
+            let frac = c.get(3).map(|f| {
+                let v: u32 = f.as_str().parse().unwrap_or(0);
+                match f.as_str().len() {
+                    1 => v * 100,
+                    2 => v * 10,
+                    _ => v,
+                }
+            });
+            out.push(((m * 60 + sec) * 1000 + frac.unwrap_or(0), words.clone()));
+        }
+    }
+    out.sort_by_key(|x| x.0);
+    out
+}
+
 pub fn is_synced_lyrics(text: &str) -> bool {
     SYNCED_RE.find_iter(text).take(3).count() >= 3
 }
@@ -373,7 +397,29 @@ pub fn write(path: &Path, req: &WriteRequest) -> Result<(), String> {
     if tag_type == TagType::Id3v2 {
         // Natywny zapis ID3v2 – obsługuje też ramki specjalne (np. UFID MusicBrainz).
         let tag = file.primary_tag().cloned().ok_or("Brak tagu")?;
-        let id3: lofty::id3::v2::Id3v2Tag = tag.into();
+        let mut id3: lofty::id3::v2::Id3v2Tag = tag.into();
+        // Tekst z czasami także w natywnej ramce ID3 SYLT (oprócz USLT z LRC).
+        if let Some(lyr) = &req.lyrics {
+            use lofty::id3::v2::{BinaryFrame, Frame, FrameId, SyncTextContentType, SynchronizedTextFrame, TimestampFormat};
+            let sylt_id = FrameId::Valid("SYLT".into());
+            let _ = id3.remove(&sylt_id).count();
+            if let Some(text) = lyr.as_deref().filter(|t| is_synced_lyrics(t)) {
+                let lines: Vec<(u32, String)> = parse_lrc(text).into_iter().filter(|(_, l)| !l.is_empty()).collect();
+                if !lines.is_empty() {
+                    let f = SynchronizedTextFrame::new(
+                        lofty::TextEncoding::UTF8,
+                        *b"und",
+                        TimestampFormat::MS,
+                        SyncTextContentType::Lyrics,
+                        None,
+                        lines,
+                    );
+                    if let Ok(bytes) = f.as_bytes() {
+                        id3.insert(Frame::Binary(BinaryFrame::new(sylt_id, bytes)));
+                    }
+                }
+            }
+        }
         id3.save_to_path(path, opts).map_err(|e| format!("Zapis nie powiódł się: {e}"))?;
     } else {
         file.save_to_path(path, opts).map_err(|e| format!("Zapis nie powiódł się: {e}"))?;

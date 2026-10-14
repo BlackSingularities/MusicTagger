@@ -91,6 +91,12 @@ fn write_read_undo_all_formats() {
         assert!(after.lyrics_synced, "{f:?}");
         assert!(after.lyrics.as_deref().unwrap().contains("zażółć"), "{f:?}");
         assert!(after.score >= 95, "{f:?} score {}", after.score);
+        if f.extension().unwrap() == "mp3" {
+            let raw = std::fs::read(f).unwrap();
+            assert!(raw.windows(4).any(|w| w == b"SYLT"), "MP3 powinien mieć ramkę SYLT");
+            assert!(raw.windows(4).any(|w| w == b"USLT"), "MP3 powinien mieć ramkę USLT");
+        }
+        assert!(!tags::lrc_path(f).exists(), "nie tworzymy pliku .lrc przy zapisie w tagu");
         assert!(after.missing.is_empty(), "{f:?} {:?}", after.missing);
     }
     // Cofnięcie całej partii przywraca stan sprzed zmian.
@@ -162,6 +168,9 @@ fn rename_with_lrc_and_undo() {
 
 #[test]
 fn lrc_header_and_changes() {
+    let l = tags::parse_lrc(LRC);
+    assert_eq!(l.len(), 3);
+    assert_eq!(l[1].0, 3500);
     let f = TagFields { title: Some("T".into()), artist: Some("A".into()), ..Default::default() };
     let s = ops::lrc_with_header(LRC, &f, 125.0);
     assert!(s.starts_with("[ar:A]\n[ti:T]\n"));

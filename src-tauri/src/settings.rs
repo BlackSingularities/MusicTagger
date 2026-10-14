@@ -80,7 +80,7 @@ impl Default for Settings {
             fetch_lyrics: true,
             prefer_synced: true,
             embed_lyrics: true,
-            write_lrc_file: true,
+            write_lrc_file: false,
             rename_pattern: "%artist% - %title%".into(),
         }
     }

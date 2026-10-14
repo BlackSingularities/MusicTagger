@@ -29,6 +29,11 @@ pub struct AppState {
     cancel: AtomicBool,
     busy: AtomicBool,
     thumbs: Mutex<HashMap<String, String>>,
+    apply_queue: Mutex<std::collections::VecDeque<String>>,
+    apply_running: AtomicBool,
+    apply_total: AtomicUsize,
+    apply_done: AtomicUsize,
+    apply_errors: AtomicUsize,
 }
 
 type St<'a> = State<'a, Arc<AppState>>;
@@ -251,35 +256,12 @@ fn storage_access() -> bool {
 
 // ───────────────────────────── Skanowanie ─────────────────────────────
 
-#[tauri::command]
-async fn scan_folder(app: AppHandle, state: St<'_>, path: String, recursive: Option<bool>) -> Result<Vec<Track>, String> {
-    let state = state.inner().clone();
-    let root = PathBuf::from(&path);
-    if !root.is_dir() {
-        return Err("Folder nie istnieje lub brak dostępu".into());
-    }
-    {
-        let mut s = state.settings.write().unwrap();
-        s.recent_folders.retain(|f| f != &path);
-        s.recent_folders.insert(0, path.clone());
-        s.recent_folders.truncate(8);
-        let _ = s.save(&state.data_dir);
-    }
-    let recursive = recursive.unwrap_or(state.settings().recursive);
+/// Czyta tagi z listy plików równolegle (z postępem) i ustawia/uzupełnia bibliotekę.
+async fn load_files(app: AppHandle, state: Arc<AppState>, files: Vec<PathBuf>, append: bool) -> Result<Vec<Track>, String> {
     let min_cover = state.settings().min_cover_size;
-    state.cancel.store(false, Ordering::SeqCst);
     let app2 = app.clone();
     let st2 = state.clone();
-    let tracks = tauri::async_runtime::spawn_blocking(move || {
-        let _ = app2.emit("scan-progress", ScanProgress { done: 0, total: 0, current: path.clone(), phase: "collect".into() });
-        let walker = walkdir::WalkDir::new(&root).follow_links(false).max_depth(if recursive { 64 } else { 1 });
-        let files: Vec<PathBuf> = walker
-            .into_iter()
-            .filter_entry(|e| !e.file_name().to_string_lossy().starts_with('.'))
-            .flatten()
-            .filter(|e| e.file_type().is_file() && tags::is_audio(e.path()))
-            .map(|e| e.into_path())
-            .collect();
+    let mut tracks = tauri::async_runtime::spawn_blocking(move || {
         let total = files.len();
         let done = AtomicUsize::new(0);
         let results: Mutex<Vec<Track>> = Mutex::new(Vec::with_capacity(total));
@@ -306,22 +288,89 @@ async fn scan_folder(app: AppHandle, state: St<'_>, path: String, recursive: Opt
                 });
             }
         });
-        let mut v = results.into_inner().unwrap();
-        v.sort_by(|a, b| {
-            (a.folder.to_lowercase(), a.tags.disc.unwrap_or(1), a.tags.track.unwrap_or(999), a.file_name.to_lowercase())
-                .cmp(&(b.folder.to_lowercase(), b.tags.disc.unwrap_or(1), b.tags.track.unwrap_or(999), b.file_name.to_lowercase()))
-        });
-        v
+        results.into_inner().unwrap()
     })
     .await
     .map_err(|e| e.to_string())?;
 
+    if append {
+        let tr = state.tracks.lock().unwrap();
+        tracks.retain(|t| !tr.contains_key(&t.id));
+        tracks.extend(tr.values().cloned());
+    }
+    tracks.sort_by(|a, b| {
+        (a.folder.to_lowercase(), a.tags.disc.unwrap_or(1), a.tags.track.unwrap_or(999), a.file_name.to_lowercase())
+            .cmp(&(b.folder.to_lowercase(), b.tags.disc.unwrap_or(1), b.tags.track.unwrap_or(999), b.file_name.to_lowercase()))
+    });
+    if append {
+        // Zachowujemy statusy i propozycje już wczytanych utworów.
+        let tr = state.tracks.lock().unwrap();
+        for t in tracks.iter_mut() {
+            if let Some(old) = tr.get(&t.id) {
+                *t = old.clone();
+            }
+        }
+    }
     *state.order.lock().unwrap() = tracks.iter().map(|t| t.id.clone()).collect();
     *state.tracks.lock().unwrap() = tracks.iter().map(|t| (t.id.clone(), t.clone())).collect();
-    state.proposals.lock().unwrap().clear();
-    state.thumbs.lock().unwrap().clear();
+    if !append {
+        state.proposals.lock().unwrap().clear();
+        state.thumbs.lock().unwrap().clear();
+    }
     let _ = app.emit("scan-progress", ScanProgress { done: tracks.len(), total: tracks.len(), current: String::new(), phase: "done".into() });
     Ok(tracks)
+}
+
+#[tauri::command]
+async fn scan_folder(
+    app: AppHandle,
+    state: St<'_>,
+    path: String,
+    recursive: Option<bool>,
+    append: Option<bool>,
+) -> Result<Vec<Track>, String> {
+    let state = state.inner().clone();
+    let root = PathBuf::from(&path);
+    if !root.is_dir() {
+        return Err("Folder nie istnieje lub brak dostępu".into());
+    }
+    let recursive = recursive.unwrap_or(state.settings().recursive);
+    {
+        let mut s = state.settings.write().unwrap();
+        s.recent_folders.retain(|f| f != &path);
+        s.recent_folders.insert(0, path.clone());
+        s.recent_folders.truncate(8);
+        s.recursive = recursive;
+        let _ = s.save(&state.data_dir);
+    }
+    state.cancel.store(false, Ordering::SeqCst);
+    let _ = app.emit("scan-progress", ScanProgress { done: 0, total: 0, current: path.clone(), phase: "collect".into() });
+    let files = tauri::async_runtime::spawn_blocking(move || {
+        walkdir::WalkDir::new(&root)
+            .follow_links(false)
+            .max_depth(if recursive { 64 } else { 1 })
+            .into_iter()
+            .filter_entry(|e| e.depth() == 0 || !e.file_name().to_string_lossy().starts_with('.'))
+            .flatten()
+            .filter(|e| e.file_type().is_file() && tags::is_audio(e.path()))
+            .map(|e| e.into_path())
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    load_files(app, state, files, append.unwrap_or(false)).await
+}
+
+/// Wczytuje wybrane pliki (bez przeszukiwania folderów).
+#[tauri::command]
+async fn scan_files(app: AppHandle, state: St<'_>, paths: Vec<String>, append: Option<bool>) -> Result<Vec<Track>, String> {
+    let state = state.inner().clone();
+    state.cancel.store(false, Ordering::SeqCst);
+    let files: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).filter(|p| p.is_file() && tags::is_audio(p)).collect();
+    if files.is_empty() {
+        return Err("Nie wybrano obsługiwanych plików audio".into());
+    }
+    load_files(app, state, files, append.unwrap_or(false)).await
 }
 
 #[tauri::command]
@@ -524,45 +573,131 @@ fn discard_proposals(app: AppHandle, state: St, ids: Vec<String>) {
     }
 }
 
+/// Dodaje propozycje do kolejki zapisu. Kolejka działa w tle i zapisuje kilka plików równolegle,
+/// więc kolejne akceptacje można dodawać w trakcie zapisu.
 #[tauri::command]
-async fn apply_proposals(app: AppHandle, state: St<'_>, ids: Vec<String>) -> Result<(), String> {
+async fn apply_proposals(app: AppHandle, state: St<'_>, ids: Vec<String>) -> Result<usize, String> {
     let state = state.inner().clone();
-    job_guard(&state)?;
-    let batch = uuid::Uuid::new_v4().to_string();
-    let total = ids.len();
-    tauri::async_runtime::spawn(async move {
-        let settings = state.settings();
-        let mut errors = 0;
-        for (i, id) in ids.iter().enumerate() {
-            if state.cancel.load(Ordering::SeqCst) {
-                break;
-            }
-            let p = state.proposals.lock().unwrap().get(id).cloned();
-            let (Some(p), Ok(t)) = (p, state.track(id)) else { continue };
-            if let Some(w) = state.set_status(id, TrackStatus::Working) {
-                emit_track(&app, &w, None);
-            }
-            match ops::apply_proposal(&t, &p, &settings, &state.history, &batch).await {
-                Ok(nt) => {
-                    state.proposals.lock().unwrap().remove(id);
-                    state.put(nt.clone());
-                    emit_track(&app, &nt, None);
-                }
-                Err(e) => {
-                    errors += 1;
-                    let mut nt = t.clone();
-                    nt.status = TrackStatus::Error;
-                    nt.error = Some(e);
-                    state.put(nt.clone());
-                    emit_track(&app, &nt, Some(p));
+    let added = {
+        let mut q = state.apply_queue.lock().unwrap();
+        let mut n = 0;
+        for id in ids {
+            if !q.contains(&id) && state.proposals.lock().unwrap().contains_key(&id) {
+                q.push_back(id.clone());
+                n += 1;
+                if let Some(t) = state.set_status(&id, TrackStatus::Queued) {
+                    emit_track(&app, &t, None);
                 }
             }
-            let _ = app.emit("job-progress", JobProgress { kind: "apply".into(), done: i + 1, total, running: true, errors });
         }
-        state.busy.store(false, Ordering::SeqCst);
-        let _ = app.emit("job-progress", JobProgress { kind: "apply".into(), done: total, total, running: false, errors });
-    });
-    Ok(())
+        n
+    };
+    state.apply_total.fetch_add(added, Ordering::SeqCst);
+    if !state.apply_running.swap(true, Ordering::SeqCst) {
+        state.cancel.store(false, Ordering::SeqCst);
+        tauri::async_runtime::spawn(apply_worker(app, state));
+    }
+    Ok(added)
+}
+
+async fn apply_worker(app: AppHandle, state: Arc<AppState>) {
+    let batch = uuid::Uuid::new_v4().to_string();
+    let progress = |running: bool| {
+        let _ = app.emit(
+            "job-progress",
+            JobProgress {
+                kind: "apply".into(),
+                done: state.apply_done.load(Ordering::SeqCst),
+                total: state.apply_total.load(Ordering::SeqCst),
+                running,
+                errors: state.apply_errors.load(Ordering::SeqCst),
+            },
+        );
+    };
+    progress(true);
+    loop {
+        let settings = state.settings();
+        let parallel = settings.concurrency.clamp(2, 4);
+        let chunk: Vec<String> = {
+            let mut q = state.apply_queue.lock().unwrap();
+            if state.cancel.load(Ordering::SeqCst) {
+                for id in q.drain(..) {
+                    if let Some(t) = state.set_status(&id, TrackStatus::Proposed) {
+                        let p = state.proposals.lock().unwrap().get(&id).cloned();
+                        emit_track(&app, &t, p);
+                    }
+                }
+            }
+            let n = parallel.min(q.len());
+            q.drain(..n).collect()
+        };
+        if chunk.is_empty() {
+            break;
+        }
+        futures::future::join_all(chunk.into_iter().map(|id| {
+            let app = app.clone();
+            let state = state.clone();
+            let settings = settings.clone();
+            let batch = batch.clone();
+            async move {
+                let p = state.proposals.lock().unwrap().get(&id).cloned();
+                let (Some(p), Ok(t)) = (p, state.track(&id)) else { return };
+                if let Some(w) = state.set_status(&id, TrackStatus::Working) {
+                    emit_track(&app, &w, None);
+                }
+                match ops::apply_proposal(&t, &p, &settings, &state.history, &batch).await {
+                    Ok(nt) => {
+                        state.proposals.lock().unwrap().remove(&id);
+                        state.put(nt.clone());
+                        emit_track(&app, &nt, None);
+                    }
+                    Err(e) => {
+                        state.apply_errors.fetch_add(1, Ordering::SeqCst);
+                        let mut nt = t.clone();
+                        nt.status = TrackStatus::Error;
+                        nt.error = Some(e);
+                        state.put(nt.clone());
+                        emit_track(&app, &nt, Some(p));
+                    }
+                }
+                state.apply_done.fetch_add(1, Ordering::SeqCst);
+            }
+        }))
+        .await;
+        progress(true);
+    }
+    state.apply_running.store(false, Ordering::SeqCst);
+    progress(false);
+    state.apply_total.store(0, Ordering::SeqCst);
+    state.apply_done.store(0, Ordering::SeqCst);
+    state.apply_errors.store(0, Ordering::SeqCst);
+}
+
+static COVER_SIZES: once_cell::sync::Lazy<Mutex<HashMap<String, (u32, u32, usize)>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
+
+#[derive(Serialize)]
+struct CoverSize {
+    url: String,
+    width: u32,
+    height: u32,
+    bytes: usize,
+}
+
+/// Sprawdza rzeczywistą rozdzielczość okładki pod adresem (pobiera obraz, wynik w pamięci podręcznej).
+#[tauri::command]
+async fn probe_cover(url: String) -> Result<CoverSize, String> {
+    if let Some((w, h, b)) = COVER_SIZES.lock().unwrap().get(&url).cloned() {
+        return Ok(CoverSize { url, width: w, height: h, bytes: b });
+    }
+    let mut data = sources::http::get_bytes(&url).await;
+    if data.is_err() && url.contains("front-1200") {
+        data = sources::http::get_bytes(&url.replace("-1200", "")).await;
+    }
+    let data = data?;
+    let (w, h, _) = tags::image_info(&data).ok_or("To nie jest obraz")?;
+    COVER_SIZES.lock().unwrap().insert(url.clone(), (w, h, data.len()));
+    Ok(CoverSize { url, width: w, height: h, bytes: data.len() })
 }
 
 // ───────────────────────────── Ręczna edycja ─────────────────────────────
@@ -868,6 +1003,11 @@ pub fn run() {
                 cancel: AtomicBool::new(false),
                 busy: AtomicBool::new(false),
                 thumbs: Mutex::new(HashMap::new()),
+                apply_queue: Mutex::new(Default::default()),
+                apply_running: AtomicBool::new(false),
+                apply_total: AtomicUsize::new(0),
+                apply_done: AtomicUsize::new(0),
+                apply_errors: AtomicUsize::new(0),
             });
             app.manage(state);
             Ok(())
@@ -881,6 +1021,7 @@ pub fn run() {
             list_dirs,
             storage_access,
             scan_folder,
+            scan_files,
             reload_track,
             get_cover,
             export_cover,
@@ -892,6 +1033,7 @@ pub fn run() {
             choose_alternative,
             discard_proposals,
             apply_proposals,
+            probe_cover,
             save_edits,
             fetch_cover_b64,
             read_image_file,
