@@ -23,7 +23,9 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": [
+          "**"
+        ]
       }
     }
   },
@@ -44,11 +46,16 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["Polish", "English"],
+        "languages": [
+          "Polish",
+          "English"
+        ],
         "displayLanguageSelector": false
       },
       "wix": {
-        "language": ["pl-PL", "en-US"]
+        "language": [
+          "en-US"
+        ]
       }
     },
     "android": {
