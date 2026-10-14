@@ -98,7 +98,10 @@ function toast(msg, kind = 'info', action) {
   }
   const close = () => { el.classList.add('out'); setTimeout(() => el.remove(), 260); };
   el.addEventListener('click', (e) => { if (e.target === el) close(); });
-  $('#toasts').appendChild(el);
+  const box = $('#toasts');
+  const max = isMobile() ? 1 : 3;
+  while (box.children.length >= max) box.firstElementChild.remove();
+  box.appendChild(el);
   setTimeout(close, kind === 'bad' ? 8000 : action ? 9000 : 4200);
 }
 
@@ -435,7 +438,7 @@ function renderList(el) {
   const some = !all && S.visible.some((x) => S.selected.has(x.id));
   const sh = (k, label, cls = '') => `<span class="sortable ${cls}" data-sort="${k}">${esc(label)}${S.sort.key === k ? (S.sort.dir > 0 ? ' ↑' : ' ↓') : ''}</span>`;
   el.innerHTML = `<div class="list-head"><button class="cb ${all ? 'on' : some ? 'part' : ''}" id="sel-all" title="Ctrl+A">${icon('check')}</button><span></span>
-    ${sh('title', t('colTitle'))}<span class="c-album">${sh('album', t('colAlbum'))}</span><span>${esc(t('colMissing'))}</span>${sh('score', t('colScore'))}<span>${esc(t('colStatus'))}</span></div>
+    ${sh('title', t('colTitle'))}<span class="c-album">${sh('album', t('colAlbum'))}</span><span>${esc(t('colMissing'))}</span><span class="c-score-h">${sh('score', t('colScore'))}</span><span>${esc(t('colStatus'))}</span></div>
     <div class="list-scroll" id="lscroll"><div class="list-inner" id="linner"></div></div>`;
   if (!S.visible.length) {
     $('#lscroll').innerHTML = `<div class="empty">${icon('filter', 'xl')}<p>${esc(t('nothingHere'))}</p></div>`;
@@ -550,6 +553,7 @@ function renderAlbums(el) {
 function renderSelbar() {
   const bar = $('#selbar');
   const n = S.selected.size;
+  document.body.classList.toggle('selbar-open', !!n && S.view === 'library');
   if (!n || S.view !== 'library') { bar.hidden = true; return; }
   const withProp = [...S.selected].filter((id) => S.proposals.has(id)).length;
   bar.hidden = false;
@@ -584,6 +588,7 @@ function closeDrawer(fromBack) {
 function renderDrawer() {
   const d = $('#drawer');
   const x = S.active && S.byId.get(S.active);
+  document.body.classList.toggle('drawer-open', !!x);
   if (!x) { d.classList.remove('open'); d.setAttribute('aria-hidden', 'true'); d.innerHTML = ''; return; }
   d.classList.add('open');
   d.setAttribute('aria-hidden', 'false');
