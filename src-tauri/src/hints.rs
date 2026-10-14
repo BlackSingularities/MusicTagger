@@ -40,7 +40,10 @@ re!(
     GARBAGE,
     r"(?i)^(?:track|utw[oó]r|audio ?track|piste|pista|titel|unknown|untitled|nieznany|bez tytu[lł]u|new recording|nagranie|audio|recording|ścieżka|sciezka)?\s*[-_#.]?\s*\d{0,4}$"
 );
-re!(FEAT, r"(?i)\s*[\(\[]?\s*(?:feat\.?|ft\.?|featuring|with)\s+([^\)\]]+)[\)\]]?");
+re!(
+    FEAT,
+    r"(?i)\s*(?:[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+([^\)\]]+)[\)\]]|\s(?:feat\.|ft\.|feat|ft|featuring)\s+(.+)$)"
+);
 re!(MULTISPACE, r"\s+");
 re!(SPLIT_ARTISTS, r"(?i)\s*(?:,|&|\band\b|\bi\b|\bx\b|\bvs\.?\b|/|;|\+)\s*");
 
@@ -116,7 +119,15 @@ pub fn is_garbage_artist(s: &str) -> bool {
 pub fn is_garbage_album(s: &str) -> bool {
     let f = fold(s.trim());
     f.is_empty()
-        || matches!(f.as_str(), "unknown" | "unknown album" | "nieznany album" | "album" | "music" | "muzyka" | "download" | "downloads" | "pobrane")
+        || matches!(
+            f.as_str(),
+            "unknown" | "unknown album" | "nieznany album" | "album" | "albums" | "albumy" | "music" | "my music" | "muzyka"
+                | "moja muzyka" | "download" | "downloads" | "pobrane" | "misc" | "various" | "inne" | "rozne" | "new folder"
+                | "nowy folder" | "mp3" | "flac" | "audio" | "songs" | "piosenki" | "utwory" | "telegram" | "whatsapp audio"
+                | "bluetooth" | "sd card" | "lib" | "library" | "biblioteka" | "media" | "sounds" | "temp" | "tmp" | "desktop"
+                | "pulpit" | "documents" | "dokumenty" | "storage" | "0" | "emulated" | "sdcard" | "playlist" | "playlists"
+                | "youtube" | "spotify" | "tiktok" | "ringtones" | "dzwonki" | "recordings" | "nagrania"
+        )
 }
 
 /// Wersja (live/remix/acoustic…) wykryta w tytule lub dopisku.
@@ -352,7 +363,7 @@ pub fn parse_path(path: &Path) -> Hint {
             if h.artist.is_none() {
                 if let Some(a) = art {
                     h.artist = Some(a);
-                } else if let Some(artist_dir) = dirs.get(1) {
+                } else if let Some(artist_dir) = dirs.get(1).filter(|_| h.year.is_some() || h.track.is_some()) {
                     let a = clean_part(artist_dir);
                     if !is_garbage_album(&a) && !is_garbage_artist(&a) {
                         h.artist = Some(a);
@@ -373,7 +384,7 @@ pub fn parse_path(path: &Path) -> Hint {
 /// Usuwa „feat.” z tytułu i zwraca listę gości.
 pub fn split_feat(title: &str) -> (String, Option<String>) {
     if let Some(c) = FEAT.captures(title) {
-        let guests = c.get(1).map(|m| m.as_str().trim().to_string());
+        let guests = c.get(1).or(c.get(2)).map(|m| m.as_str().trim().to_string());
         let t = FEAT.replace(title, "").trim().to_string();
         return (t, guests);
     }
@@ -434,5 +445,12 @@ mod tests {
         assert!(is_garbage_title("01"));
         assert!(!is_garbage_title("1999"));
         assert_eq!(primary_artist("Taco Hemingway feat. Dawid Podsiadło"), "Taco Hemingway");
+        assert_eq!(primary_artist("Daft Punk"), "Daft Punk");
+        assert_eq!(split_feat("Get Lucky ft. Pharrell Williams").0, "Get Lucky");
+        assert_eq!(split_feat("Lose Yourself (feat. X)").0, "Lose Yourself");
+        assert_eq!(split_feat("With or Without You").0, "With or Without You");
+        let h = parse_path(std::path::Path::new("/s/lib/Misc/Track 03.mp3"));
+        assert_eq!(h.artist, None);
+        assert_eq!(h.album, None);
     }
 }
