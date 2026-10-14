@@ -605,6 +605,7 @@ function renderDrawer() {
       <div class="grow"><div class="row" style="gap:6px">${statusHTML(x)}</div>
         <h2>${esc(x.tags.title || x.fileName)}</h2>
         <div class="muted ellipsis">${esc(x.tags.artist || t('unknownArtist'))}${x.tags.album ? ' — ' + esc(x.tags.album) : ''}</div>
+        ${x.error && x.status !== 'proposed' ? `<div class="selectable" style="color:var(--bad);font-size:12.5px;margin-top:6px">${icon('alert')} ${esc(x.error)}</div>` : ''}
         <div class="score" style="margin-top:8px;max-width:220px"><div class="bar"><i style="width:${x.score}%;background:${scoreColor(x.score)}"></i></div><b>${x.score}</b></div>
       </div>
       <div class="col" style="gap:4px"><button class="btn icon ghost" id="d-close" title="Esc">${icon('x')}</button>

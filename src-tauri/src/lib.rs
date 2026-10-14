@@ -423,9 +423,13 @@ async fn analyze_one(app: &AppHandle, state: &Arc<AppState>, id: &str, manual: O
         }
         None => {
             let mut nt = t.clone();
-            let offline = !res.warnings.is_empty();
-            nt.status = TrackStatus::NotFound;
-            nt.error = offline.then(|| res.warnings.join("; "));
+            if res.offline {
+                nt.status = TrackStatus::Error;
+                nt.error = Some("Brak połączenia z internetem – sprawdź sieć i spróbuj ponownie".into());
+            } else {
+                nt.status = TrackStatus::NotFound;
+                nt.error = (!res.warnings.is_empty()).then(|| res.warnings.join("; "));
+            }
             state.put(nt.clone());
             emit_track(app, &nt, None);
         }

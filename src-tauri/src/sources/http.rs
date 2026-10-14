@@ -94,6 +94,8 @@ impl Limiter {
 pub enum HttpError {
     NotFound,
     RateLimited,
+    /// Brak połączenia (DNS, odmowa, timeout) – nie ma sensu ponawiać wielokrotnie.
+    Network(String),
     Other(String),
 }
 
@@ -102,13 +104,28 @@ impl std::fmt::Display for HttpError {
         match self {
             HttpError::NotFound => write!(f, "nie znaleziono"),
             HttpError::RateLimited => write!(f, "limit zapytań"),
+            HttpError::Network(s) => write!(f, "brak połączenia z {s}"),
             HttpError::Other(s) => write!(f, "{s}"),
         }
     }
 }
 
+/// Serwisy, z którymi chwilowo nie ma połączenia – kolejne zapytania kończą się od razu.
+static OFFLINE: Lazy<std::sync::Mutex<HashMap<&'static str, Instant>>> = Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
+
+fn offline_now(service: &'static str) -> bool {
+    OFFLINE.lock().unwrap().get(service).map(|t| Instant::now() < *t).unwrap_or(false)
+}
+
+fn mark_offline(service: &'static str) {
+    OFFLINE.lock().unwrap().insert(service, Instant::now() + Duration::from_secs(20));
+}
+
 /// GET z limiterem, ponawianiem przy 503/błędach sieci i parsowaniem JSON.
 pub async fn get_json<T: DeserializeOwned>(service: &'static str, url: &str) -> Result<T, HttpError> {
+    if offline_now(service) {
+        return Err(HttpError::Network(service.to_string()));
+    }
     let mut last = String::new();
     for attempt in 0..3u32 {
         if !LIMITER.acquire(service).await {
@@ -134,8 +151,12 @@ pub async fn get_json<T: DeserializeOwned>(service: &'static str, url: &str) -> 
                 }
             }
             Err(e) => {
+                if (e.is_connect() || e.is_timeout()) && attempt >= 1 {
+                    mark_offline(service);
+                    return Err(HttpError::Network(service.to_string()));
+                }
                 last = format!("{service}: {e}");
-                tokio::time::sleep(Duration::from_millis(800 * (attempt as u64 + 1))).await;
+                tokio::time::sleep(Duration::from_millis(500 * (attempt as u64 + 1))).await;
             }
         }
     }

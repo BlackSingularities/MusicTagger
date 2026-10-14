@@ -162,6 +162,8 @@ pub fn release_preference(c: &Candidate, q: &Query, settings: &Settings, min_yea
 pub struct Analysis {
     pub proposal: Option<Proposal>,
     pub warnings: Vec<String>,
+    /// Żadne źródło nie odpowiedziało z powodu braku sieci.
+    pub offline: bool,
 }
 
 fn net_warn(warnings: &mut Vec<String>, e: &HttpError) {
@@ -169,6 +171,10 @@ fn net_warn(warnings: &mut Vec<String>, e: &HttpError) {
         HttpError::NotFound => {}
         other => warnings.push(other.to_string()),
     }
+}
+
+fn all_offline(w: &[String]) -> bool {
+    !w.is_empty() && w.iter().all(|x| x.starts_with("brak połączenia"))
 }
 
 /// Główna funkcja – analizuje utwór i zwraca propozycję zmian.
@@ -312,14 +318,14 @@ pub async fn analyze(track: &Track, settings: &Settings, manual: Option<(String,
     }
 
     if scored.is_empty() {
-        return Analysis { proposal: None, warnings };
+        return Analysis { offline: all_offline(&warnings), proposal: None, warnings };
     }
 
     // 4) Wybór najlepszego nagrania, potem najlepszego wydania w jego obrębie.
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     let best_score = scored[0].0;
     if best_score < 0.55 {
-        return Analysis { proposal: None, warnings };
+        return Analysis { offline: all_offline(&warnings), proposal: None, warnings };
     }
     let best_title = hints::normalize_title(scored[0].1.fields.title.as_deref().unwrap_or(""));
     let best_artist = scored[0].1.fields.artist.clone().unwrap_or_default();
@@ -391,7 +397,7 @@ pub async fn analyze(track: &Track, settings: &Settings, manual: Option<(String,
     };
     let supporting: Vec<Candidate> = scored.iter().filter(|(_, c)| same(c)).map(|(_, c)| c.clone()).collect();
     finalize(track, &mut proposal, chosen, &supporting, settings, &q).await;
-    Analysis { proposal: Some(proposal), warnings }
+    Analysis { proposal: Some(proposal), warnings, offline: false }
 }
 
 /// Uzupełnia wybranego kandydata (szczegóły wydania, okładki, tekst) i liczy zmiany.
