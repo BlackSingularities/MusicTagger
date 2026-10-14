@@ -137,6 +137,7 @@ pub enum TrackStatus {
     Working,
     Proposed,
     Applied,
+    UpToDate,
     NotFound,
     Error,
 }
@@ -184,6 +185,8 @@ pub struct Candidate {
     pub secondary_types: Vec<String>,
     pub release_status: Option<String>,
     pub disambiguation: Option<String>,
+    /// Identyfikator w zewnętrznym serwisie (np. Deezer track id).
+    pub ext_id: Option<u64>,
     pub score: f64,
 }
 

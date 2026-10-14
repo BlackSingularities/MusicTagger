@@ -1,7 +1,7 @@
-/src-tauri/target/
-/src-tauri/gen/schemas/
-/src-tauri/gen/android/
-/node_modules/
-/dev/
 *.log
 .DS_Store
+/dev/
+/node_modules/
+/src-tauri/gen/android/
+/src-tauri/gen/schemas/
+/src-tauri/target/

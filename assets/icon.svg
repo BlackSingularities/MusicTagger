@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8b5cf6"/>
+      <stop offset="0.55" stop-color="#6d28d9"/>
+      <stop offset="1" stop-color="#db2777"/>
+    </linearGradient>
+    <linearGradient id="disc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e1b2e"/>
+      <stop offset="1" stop-color="#0b0a12"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="220" fill="url(#bg)"/>
+  <circle cx="470" cy="540" r="300" fill="url(#disc)"/>
+  <circle cx="470" cy="540" r="240" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="10"/>
+  <circle cx="470" cy="540" r="180" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="10"/>
+  <circle cx="470" cy="540" r="96" fill="#f472b6"/>
+  <circle cx="470" cy="540" r="26" fill="#0b0a12"/>
+  <path d="M640 170 L860 170 Q900 170 900 210 L900 390 Q900 420 878 440 L700 610 Q676 632 652 608 L560 516 Q538 494 560 470 L620 410 L620 190 Q620 170 640 170 Z" fill="#ffffff"/>
+  <circle cx="820" cy="250" r="36" fill="#7c3aed"/>
+</svg>
