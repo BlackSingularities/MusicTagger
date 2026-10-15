@@ -7,6 +7,7 @@ pub mod ops;
 pub mod settings;
 pub mod sources;
 pub mod tags;
+pub mod update;
 
 use futures::StreamExt;
 use history::History;
@@ -132,6 +133,8 @@ struct AppInfo {
     version: String,
     platform: String,
     data_dir: String,
+    /// "installed", "portable", "android" lub "other".
+    install_kind: String,
 }
 
 #[tauri::command]
@@ -140,6 +143,7 @@ fn app_info(state: St) -> AppInfo {
         version: env!("CARGO_PKG_VERSION").into(),
         platform: std::env::consts::OS.into(),
         data_dir: state.data_dir.to_string_lossy().into(),
+        install_kind: update::install_kind().into(),
     }
 }
 
@@ -151,6 +155,8 @@ struct UpdateInfo {
     url: String,
     download: Option<String>,
     notes: String,
+    /// Aktualizację można pobrać i zainstalować z poziomu programu.
+    can_install: bool,
 }
 
 fn version_tuple(v: &str) -> Vec<u64> {
@@ -162,7 +168,8 @@ async fn check_update() -> Result<UpdateInfo, String> {
     let url = "https://api.github.com/repos/BlackSingularities/MusicTagger/releases/latest";
     let v: serde_json::Value = sources::http::get_json("github", url).await.map_err(|e| e.to_string())?;
     let tag = v.get("tag_name").and_then(|x| x.as_str()).unwrap_or("").to_string();
-    let want = if cfg!(target_os = "android") { ".apk" } else if cfg!(windows) { "setup.exe" } else { ".AppImage" };
+    let kind = update::install_kind();
+    let want = update::asset_suffix(kind);
     let download = v.get("assets").and_then(|a| a.as_array()).and_then(|a| {
         a.iter()
             .find(|x| x.get("name").and_then(|n| n.as_str()).map(|n| n.ends_with(want)).unwrap_or(false))
@@ -172,9 +179,22 @@ async fn check_update() -> Result<UpdateInfo, String> {
         available: version_tuple(&tag) > version_tuple(env!("CARGO_PKG_VERSION")),
         latest: tag,
         url: v.get("html_url").and_then(|x| x.as_str()).unwrap_or("").into(),
-        download,
         notes: v.get("body").and_then(|x| x.as_str()).unwrap_or("").chars().take(2000).collect(),
+        can_install: matches!(kind, "portable" | "installed"),
+        download,
     })
+}
+
+/// Pobiera aktualizację, uruchamia nową wersję (lub instalator) i zamyka bieżącą.
+#[tauri::command]
+async fn install_update(app: AppHandle, url: String) -> Result<(), String> {
+    if !url.starts_with("https://github.com/BlackSingularities/MusicTagger/releases/download/") {
+        return Err("Nieprawidłowy adres aktualizacji".into());
+    }
+    let run = update::install(&url).await?;
+    std::process::Command::new(&run).spawn().map_err(|e| format!("Uruchomienie nowej wersji: {e}"))?;
+    app.exit(0);
+    Ok(())
 }
 
 // ───────────────────────────── Przeglądanie folderów ─────────────────────────────
@@ -1159,6 +1179,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            update::cleanup_old();
             let data_dir = app.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir().join("musictagger"));
             let _ = std::fs::create_dir_all(&data_dir);
             let settings = Settings::load(&data_dir).sanitized();
@@ -1187,6 +1208,7 @@ pub fn run() {
             save_settings,
             app_info,
             check_update,
+            install_update,
             get_roots,
             list_dirs,
             storage_access,

@@ -1357,7 +1357,7 @@ function renderSettings(v) {
     <div class="list-card"><h2>${icon('rename')}${esc(t('sRename'))}</h2>
       ${row(t('pattern'), esc(t('patternD')), `<input class="inp mono" data-text="renamePattern" value="${esc(s.renamePattern || '')}">`)}</div>
     <div class="list-card"><h2>${icon('info')}${esc(t('sAbout'))}</h2>
-      ${row('MusicTagger ' + S.info.version, esc(t('aboutD')), `<button class="btn tonal sm has-ic" id="chk-upd">${icon('update')}${esc(t('checkUpdates'))}</button>`)}
+      ${row('MusicTagger ' + S.info.version + (S.info.installKind === 'portable' ? ` (${t('portable')})` : ''), esc(t('aboutD')), `<button class="btn tonal sm has-ic" id="chk-upd">${icon('update')}${esc(t('checkUpdates'))}</button>`)}
       ${row(t('shortcuts'), esc(t('shortcutsD')), '')}
       ${row(t('dataDir'), `<span class="mono selectable">${esc(S.info.dataDir || '')}</span>`, '')}</div>
   </div></div>`;
@@ -1396,9 +1396,19 @@ function applyTheme() {
 async function checkUpdate(silent) {
   try {
     const u = await invoke('check_update');
-    if (u.available) snack(t('updateAvail', { v: u.latest }), 'info', { label: t('download'), run: () => opener()?.openUrl(u.download || u.url) });
-    else if (!silent) snack(t('upToDate'));
+    if (!u.available) { if (!silent) snack(t('upToDate')); return; }
+    const page = () => opener()?.openUrl(u.download || u.url);
+    if (u.canInstall && u.download) snack(t('updateAvail', { v: u.latest }), 'info', { label: t('updateNow'), run: () => installUpdate(u, page) });
+    else snack(t('updateAvail', { v: u.latest }), 'info', { label: t('download'), run: page });
   } catch (e) { if (!silent) snack(errMsg(e), 'bad'); }
+}
+/** Pobiera i instaluje aktualizację (instalator albo podmiana wersji przenośnej), potem restart. */
+async function installUpdate(u, fallback) {
+  if (S.jobs.apply?.running && !(await confirmBox(t('updateNow'), t('updateBusyQ'), t('updateNow')))) return;
+  snack(t('updating', { v: u.latest }));
+  try { await invoke('install_update', { url: u.download }); } catch (e) {
+    snack(`${t('updateFailed')}: ${errMsg(e)}`, 'bad', { label: t('download'), run: fallback });
+  }
 }
 
 // ═════════════════════════════ Akcje ═════════════════════════════
