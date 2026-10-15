@@ -475,20 +475,34 @@ function renderTopbar() {
 }
 
 function renderJobs() {
+  // Karta postępu leży w doku nad treścią (#dock), więc nie zmienia układu widoku.
+  // Przy aktualizacji zmieniamy tylko tekst i szerokość paska, bez przebudowy DOM.
   const box = $('#jobs');
-  let html = '';
+  const rows = [];
   const sc = S.scan;
   if (sc && sc.phase !== 'done') {
-    const pct = sc.total ? (sc.done / sc.total) * 100 : 0;
-    html += `<div class="job">${icon('refresh', 'sm spin')}<span>${esc(sc.total ? t('scanning', { done: sc.done, total: sc.total }) : t('collecting'))}</span><div class="lp ${sc.total ? '' : 'indet'}"><i style="width:${pct}%"></i></div><button class="btn text sm" data-act="cancel">${esc(t('stop'))}</button></div>`;
+    rows.push({ key: 'scan', ic: icon('refresh', 'sm spin'), text: sc.total ? t('scanning', { done: sc.done, total: sc.total }) : t('collecting'), pct: sc.total ? (sc.done / sc.total) * 100 : null });
   }
   for (const kind of ['analyze', 'apply']) {
     const j = S.jobs[kind];
     if (!j?.running) continue;
-    const pct = j.total ? (j.done / j.total) * 100 : 0;
-    html += `<div class="job">${icon(kind === 'apply' ? 'download' : 'sparkles', 'sm')}<span>${esc(t(kind === 'apply' ? 'applying' : 'analyzing', { done: j.done, total: j.total }))}</span><div class="lp"><i style="width:${pct}%"></i></div><button class="btn text sm" data-act="cancel">${esc(t('stop'))}</button></div>`;
+    rows.push({ key: kind, ic: icon(kind === 'apply' ? 'download' : 'sparkles', 'sm'), text: t(kind === 'apply' ? 'applying' : 'analyzing', { done: j.done, total: j.total }), pct: j.total ? (j.done / j.total) * 100 : 0 });
   }
-  box.innerHTML = html;
+  document.body.classList.toggle('has-jobs', rows.length > 0);
+  if (!rows.length) { box.innerHTML = ''; return; }
+  const sig = rows.map((r) => r.key + (r.pct === null ? '?' : '')).join(',');
+  let card = $('.jobs-card', box);
+  if (!card || card.dataset.sig !== sig) {
+    box.innerHTML = `<div class="jobs-card" data-sig="${sig}">${rows.map((r) => `<div class="job" data-job="${r.key}">${r.ic}<span class="txt"></span><span class="row" style="gap:0"><span class="pct"></span><button class="btn text sm" data-act="cancel">${esc(t('stop'))}</button></span><div class="lp ${r.pct === null ? 'indet' : ''}"><i></i></div></div>`).join('')}</div>`;
+    card = $('.jobs-card', box);
+  }
+  for (const r of rows) {
+    const el = $(`[data-job="${r.key}"]`, card);
+    const txt = $('.txt', el);
+    if (txt.textContent !== r.text) { txt.textContent = r.text; txt.title = r.text; }
+    $('.pct', el).textContent = r.pct === null ? '' : Math.floor(r.pct) + '%';
+    if (r.pct !== null) $('.lp > i', el).style.width = r.pct + '%';
+  }
 }
 
 // ═════════════════════════════ Widoki ═════════════════════════════
@@ -574,7 +588,8 @@ function renderSummary() {
 }
 function renderTools() {
   const c = counts();
-  const chip = (k, ic) => (k === 'all' || c[k] || S.quick === k ? `<button class="chip ${S.quick === k ? 'on' : ''}" data-quick="${k}">${icon('check', 'chk')}${ic && S.quick !== k ? icon(ic) : ''}${esc(t('q_' + k))}<span class="n">${c[k]}</span></button>` : '');
+  // Chipy są zawsze widoczne (puste wyszarzone), żeby rząd nie przeskakiwał, gdy liczniki rosną.
+  const chip = (k, ic) => (`<button class="chip ${S.quick === k ? 'on' : ''} ${k !== 'all' && !c[k] && S.quick !== k ? 'zero' : ''}" data-quick="${k}">${icon('check', 'chk')}${ic && S.quick !== k ? icon(ic) : ''}${esc(t('q_' + k))}<span class="n">${c[k]}</span></button>`);
   const advN = advCount();
   const advChips = [];
   for (const f of S.adv.formats) advChips.push(['formats', f, f]);
