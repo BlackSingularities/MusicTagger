@@ -557,6 +557,12 @@ body.sheet-open #snack { left: calc((100vw - var(--sheet-w) + var(--rail-w)) / 2
 /* ───────────── Strony (historia, ustawienia) ───────────── */
 .page { flex: 1; overflow: auto; padding: 8px 24px 120px; }
 .page-inner { max-width: 880px; }
+/* Ustawienia: dwie kolumny, gdy obszar jest wystarczająco szeroki (kolumny min. 440 px). */
+.page-inner.settings-cols { max-width: 1480px; columns: 2 440px; column-gap: 16px; }
+.settings-cols > .list-card { break-inside: avoid; -webkit-column-break-inside: avoid; display: inline-block; width: 100%; vertical-align: top; }
+.lrc-banner { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding: 10px 16px; border-radius: var(--r-lg); background: var(--surface-low); color: var(--on-surface); }
+.lrc-banner .grow { flex: 1; min-width: 0; }
+.result .tag.src { opacity: .75; margin-right: 6px; }
 .list-card { background: var(--surface-low); border-radius: var(--r-lg); overflow: hidden; margin-bottom: 16px; }
 .list-card > h2 { margin: 0; padding: 16px 20px 8px; font-size: 14px; font-weight: 500; color: var(--primary); display: flex; gap: 10px; align-items: center; letter-spacing: .1px; }
 .li-row { display: flex; align-items: center; gap: 16px; padding: 12px 20px; min-height: 56px; position: relative; }

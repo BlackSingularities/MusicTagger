@@ -122,6 +122,8 @@ pub struct Track {
     pub lyrics: Option<String>,
     pub lyrics_synced: bool,
     pub lrc_file: bool,
+    /// Tekst jest zapisany w tagu pliku (a nie tylko w osobnym .lrc).
+    pub lyrics_in_tag: bool,
     pub missing: Vec<String>,
     pub score: u8,
     pub status: TrackStatus,

@@ -107,6 +107,11 @@ pub async fn enrich(c: &mut Candidate) {
 
 /// Wyszukiwanie albumów – do ręcznego wyboru okładki.
 pub async fn search_albums(term: &str) -> Result<Vec<crate::models::CoverCandidate>, HttpError> {
+    Ok(album_covers(term).await?.into_iter().map(|(_, _, c)| c).collect())
+}
+
+/// Albumy z okładkami: (wykonawca, tytuł albumu, okładka).
+pub async fn album_covers(term: &str) -> Result<Vec<(String, String, crate::models::CoverCandidate)>, HttpError> {
     let url = format!("https://api.deezer.com/search/album?q={}&limit=12", urlencoding::encode(term));
     let v: Value = get_json("deezer", &url).await?;
     Ok(v.get("data")
@@ -115,17 +120,16 @@ pub async fn search_albums(term: &str) -> Result<Vec<crate::models::CoverCandida
             a.iter()
                 .filter_map(|r| {
                     let xl = s(r, "cover_xl")?;
-                    Some(crate::models::CoverCandidate {
+                    let artist = r.get("artist").and_then(|x| s(x, "name")).unwrap_or_default();
+                    let album = s(r, "title").unwrap_or_default();
+                    let c = crate::models::CoverCandidate {
                         url: xl.replace("1000x1000", "1400x1400"),
                         thumb: s(r, "cover_medium").unwrap_or(xl.clone()),
-                        source: format!(
-                            "Deezer · {} – {}",
-                            r.get("artist").and_then(|x| s(x, "name")).unwrap_or_default(),
-                            s(r, "title").unwrap_or_default()
-                        ),
+                        source: format!("Deezer · {artist} – {album}"),
                         width: 1400,
                         height: 1400,
-                    })
+                    };
+                    Some((artist, album, c))
                 })
                 .collect()
         })

@@ -68,7 +68,7 @@ const baseName = (p) => String(p || '').split(/[\\/]/).filter(Boolean).pop() || 
 const fold = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ł/g, 'l');
 const fieldLabel = (f) => t('f_' + f);
 const CORE = ['title', 'artist', 'album', 'year', 'track'];
-const MISS_KEYS = ['title', 'artist', 'album', 'albumArtist', 'year', 'track', 'genre', 'cover', 'coverSmall', 'lyrics', 'syncedLyrics'];
+const MISS_KEYS = ['title', 'artist', 'album', 'albumArtist', 'year', 'track', 'genre', 'cover', 'coverSmall', 'lyrics', 'syncedLyrics', 'lrcOnly'];
 const STATUSES = ['idle', 'proposed', 'applied', 'upToDate', 'notFound', 'error'];
 
 let rq = null;
@@ -293,6 +293,7 @@ const QUICK = {
   noCover: (x) => x.missing.includes('cover') || x.missing.includes('coverSmall'),
   noLyrics: (x) => x.missing.includes('lyrics'),
   noSynced: (x) => !x.lyricsSynced,
+  lrcOnly: (x) => x.missing.includes('lrcOnly'),
   proposed: (x) => x.status === 'proposed' && S.proposals.has(x.id),
   dups: (x) => S.dupIndex.has(x.id),
   problems: (x) => x.status === 'notFound' || x.status === 'error',
@@ -566,11 +567,13 @@ function renderSummary() {
   const okCover = S.tracks.filter((x) => !QUICK.noCover(x)).length;
   const okLyr = S.tracks.filter((x) => x.lyricsSynced).length;
   const need = S.tracks.filter((x) => x.score < 100).length;
+  const lrcN = S.tracks.filter(QUICK.lrcOnly).length;
   const bar = (k, label, ok) => `<div class="sum-bar" data-quick="${k}" title="${esc(t('showMissing'))}"><div class="row"><span>${esc(label)}</span><b>${ok}/${n}</b></div><div class="lp"><i style="width:${(ok / n) * 100}%"></i></div></div>`;
   $('#summary').innerHTML = `<div class="summary">
     <svg class="ring" viewBox="0 0 64 64"><circle class="bg" cx="32" cy="32" r="27"/><circle class="fg" cx="32" cy="32" r="27" stroke-dasharray="169.6" style="stroke-dashoffset:${169.6 * (1 - avg / 100)}"/><text x="32" y="33">${avg}%</text></svg>
     <div class="sum-main"><div class="big">${esc(t('nTracks', { n }))}</div><div class="t-body-s muted">${need ? esc(t('needWork', { n: need })) : esc(t('allComplete'))}</div></div>
-    <div class="sum-bars">${bar('missingTags', t('sumTags'), okTags)}${bar('noCover', t('sumCovers'), okCover)}${bar('noSynced', t('sumLyrics'), okLyr)}</div></div>`;
+    <div class="sum-bars">${bar('missingTags', t('sumTags'), okTags)}${bar('noCover', t('sumCovers'), okCover)}${bar('noSynced', t('sumLyrics'), okLyr)}</div></div>
+    ${lrcN ? `<div class="lrc-banner">${icon('lyrics')}<span class="grow">${esc(t('lrcFound', { n: lrcN }))}</span><button class="btn tonal sm has-ic" data-act="merge-lrc">${icon('check')}${esc(t('lrcMerge'))}</button></div>` : ''}`;
 }
 function renderTools() {
   const c = counts();
@@ -589,7 +592,7 @@ function renderTools() {
       ${qchip}
       ${S.album ? `<button class="chip input" data-rm="album">${icon('disc', 'sm')}${esc(albumName)}<span class="x">${icon('x', 'sm')}</span></button>` : ''}
       ${advChips.map(([k, v, l]) => `<button class="chip input" data-rm="${k}" data-v="${esc(v)}">${esc(l)}<span class="x">${icon('x', 'sm')}</span></button>`).join('')}
-      ${chip('all')}${chip('missingTags')}${chip('noCover')}${chip('noLyrics')}${chip('noSynced')}${chip('proposed', 'sparkles')}${chip('dups', 'duplicate')}${chip('problems', 'alert')}${chip('complete')}
+      ${chip('all')}${chip('missingTags')}${chip('noCover')}${chip('noLyrics')}${chip('noSynced')}${chip('lrcOnly', 'lyrics')}${chip('proposed', 'sparkles')}${chip('dups', 'duplicate')}${chip('problems', 'alert')}${chip('complete')}
     </div>
     <button class="ibtn" data-act="sort-menu" title="${esc(t('sortBy'))}">${icon('sort')}</button>
     <div class="seg sm"><button class="${S.mode === 'list' ? 'on' : ''}" data-mode="list" title="${esc(t('viewList'))}">${icon('list', 'sm')}</button><button class="${S.mode === 'albums' ? 'on' : ''}" data-mode="albums" title="${esc(t('viewAlbums'))}">${icon('grid', 'sm')}</button></div>`;
@@ -1189,7 +1192,7 @@ function renderHistory(v) {
     map.get(e.batch).items.push(e);
   }
   const sumText = (e) => (e.action === 'rename' ? e.summary.join(', ') : e.summary.map((s) => (t('f_' + s) !== 'f_' + s ? t('f_' + s) : t('mi_' + s))).join(', '));
-  v.innerHTML = `<div class="page"><div class="page-inner">
+  v.innerHTML = `<div class="page"><div class="page-inner settings-cols">
     ${!h.length ? `<div class="empty">${icon('history', 'xl')}<h2>${esc(t('historyEmptyTitle'))}</h2><p>${esc(t('historyEmpty'))}</p></div>` : ''}
     ${batches.slice(0, 200).map((b) => {
       const active = b.items.filter((x) => !x.undone).length;
@@ -1231,6 +1234,7 @@ function renderSettings(v) {
       ${row(t('writeMode'), esc(t('writeModeD')), sel('writeMode', [['missing', t('wmMissing')], ['overwrite', t('wmOverwrite')]]))}
       ${swRow('autoApply', t('autoApply'), t('autoApplyD'))}
       ${row(t('threshold'), esc(t('thresholdD')), num('autoApplyThreshold', 0.6, 1, 0.01, (x) => Math.round(x * 100) + '%'))}
+      ${swRow('mixSources', t('mixSources'), t('mixSourcesD'))}
       ${swRow('preferOriginalRelease', t('preferOriginal'), t('preferOriginalD'))}
       ${swRow('fillAlbumArtist', t('fillAlbumArtist'))}${swRow('fillGenre', t('fillGenre'))}${swRow('writeMbIds', t('writeMbIds'), t('writeMbIdsD'))}
       ${row(t('concurrency'), esc(t('concurrencyD')), num('concurrency', 1, 8, 1, (x) => x))}</div>
@@ -1240,11 +1244,14 @@ function renderSettings(v) {
       ${row(t('coverQuality'), '', num('coverQuality', 60, 100, 1, (x) => x + '%'))}${swRow('saveFolderJpg', t('saveFolderJpg'), t('saveFolderJpgD'))}</div>
     <div class="list-card"><h2>${icon('lyrics')}${esc(t('sLyrics'))}</h2>
       ${swRow('fetchLyrics', t('fetchLyrics'))}${swRow('preferSynced', t('preferSynced'), t('preferSyncedD'))}
-      ${swRow('embedLyrics', t('embedLyrics'), t('embedLyricsD'))}${swRow('writeLrcFile', t('writeLrc'), t('writeLrcD'))}</div>
+      ${swRow('embedLyrics', t('embedLyrics'), t('embedLyricsD'))}${swRow('writeLrcFile', t('writeLrc'), t('writeLrcD'))}${swRow('hideLrcFiles', t('hideLrc'), t('hideLrcD'))}
+      ${swRow('mergeLrcFiles', t('mergeLrc'), t('mergeLrcD'))}
+      ${row(t('lrcAfter'), esc(t('lrcAfterD')), sel('lrcAfterMerge', [['hide', t('lrcHide')], ['delete', t('lrcDelete')], ['keep', t('lrcKeep')]]))}</div>
     <div class="list-card"><h2>${icon('layers')}${esc(t('sSources'))}</h2>
       ${swRow('useMusicbrainz', 'MusicBrainz + Cover Art Archive', t('srcMb'))}${swRow('useDeezer', 'Deezer', t('srcDeezer'))}${swRow('useItunes', 'Apple iTunes', t('srcItunes'))}
       ${row(t('itunesCountry'), '', sel('itunesCountry', [['PL', 'Polska'], ['US', 'USA'], ['GB', 'UK'], ['DE', 'Deutschland'], ['FR', 'France'], ['JP', 'Japan']]))}
-      ${swRow('useLrclib', 'LRCLIB', t('srcLrclib'))}
+      ${swRow('useLrclib', 'LRCLIB', t('srcLrclib'))}${swRow('useNetease', 'NetEase Cloud Music', t('srcNetease'))}
+      ${swRow('useTekstowo', 'Tekstowo.pl', t('srcTekstowo'))}${swRow('useGenius', 'Genius', t('srcGenius'))}${swRow('useLyricsovh', 'lyrics.ovh', t('srcLyricsovh'))}
       ${row('AcoustID', esc(t('srcAcoustid')) + ` <a href="#" id="acoustid-link">${esc(t('getKey'))}</a>`, sw('useAcoustid'), 'useAcoustid')}
       ${row(t('acoustidKey'), esc(t('acoustidKeyD')), `<input class="inp mono" data-text="acoustidKey" value="${esc(s.acoustidKey || '')}" placeholder="AbCdEf123">`)}</div>
     <div class="list-card"><h2>${icon('rename')}${esc(t('sRename'))}</h2>
@@ -1408,7 +1415,10 @@ async function coverSearch(ids, query) {
   } catch (e) { snack(errMsg(e), 'bad'); }
 }
 async function lyricsSearch(x, onPick) {
-  let results = [], picked = null;
+  let results = [], picked = null, seq = 0;
+  const badge = (r) => r.loaded
+    ? (r.syncedLyrics ? `<span class="tag ok">${icon('clock')}${esc(t('synced'))}</span>` : r.plainLyrics ? `<span class="tag">${esc(t('plain'))}</span>` : `<span class="tag">${esc(t('instrumentalShort'))}</span>`)
+    : '';
   const run = async (ov, q) => {
     const box = $('#ls-list', ov);
     box.innerHTML = `<div class="row">${icon('refresh', 'spin')} ${esc(t('searching'))}</div>`;
@@ -1417,33 +1427,54 @@ async function lyricsSearch(x, onPick) {
       if (!results.length) { box.innerHTML = `<p>${esc(t('notFoundMsg'))}</p>`; return; }
       box.innerHTML = results.map((r, i) => {
         const dd = r.duration ? Math.abs(r.duration - x.duration) : null;
-        return `<div class="result" data-i="${i}"><div class="grow"><b>${esc(r.trackName)}</b> — ${esc(r.artistName)}<div class="t-body-s muted">${esc(r.albumName || '')} · ${fmtDur(r.duration)}${dd !== null && dd > 3 ? ` <span class="tag warn">Δ ${Math.round(dd)} s</span>` : ''}</div></div>
-          ${r.syncedLyrics ? `<span class="tag ok">${icon('clock')}${esc(t('synced'))}</span>` : r.plainLyrics ? `<span class="tag">${esc(t('plain'))}</span>` : `<span class="tag">${esc(t('instrumentalShort'))}</span>`}</div>`;
+        const meta = [r.albumName, r.duration ? fmtDur(r.duration) : ''].filter(Boolean).map(esc).join(' · ');
+        return `<div class="result" data-i="${i}"><div class="grow"><b>${esc(r.trackName)}</b> — ${esc(r.artistName)}<div class="t-body-s muted">${meta}${dd !== null && dd > 3 ? ` <span class="tag warn">Δ ${Math.round(dd)} s</span>` : ''}</div></div>
+          <span class="tag src">${esc(r.source)}</span><span class="badge-slot">${badge(r)}</span></div>`;
       }).join('');
     } catch (e) { box.innerHTML = `<p>${esc(errMsg(e))}</p>`; }
   };
-  const q0 = [x.tags.artist, x.tags.title].filter(Boolean).join(' ') || x.fileName.replace(/\.[^.]+$/, '');
+  const show = (ov, r) => {
+    picked = r.syncedLyrics || r.plainLyrics || null;
+    const pv = $('#ls-prev', ov);
+    pv.style.display = 'block';
+    pv.textContent = picked || (r.instrumental ? t('instrumental') : t('notFoundMsg'));
+  };
+  const q0 = [x.tags.artist, x.tags.title].filter(Boolean).join(' - ') || x.fileName.replace(/\.[^.]+$/, '');
   const ok = await dialog({
     title: t('lyricsSearch'), wide: true,
-    body: `<div class="search sm" style="max-width:none;margin-bottom:12px">${icon('search')}<input id="ls-q" value="${esc(q0)}"></div><div id="ls-list"></div><div id="ls-prev" class="lyr-prev on-s" style="display:none;margin-top:10px"></div>`,
+    body: `<div class="search sm" style="max-width:none;margin-bottom:12px">${icon('search')}<input id="ls-q" value="${esc(q0)}"></div><p class="t-body-s muted" style="margin:-4px 0 10px">${esc(t('lyricsSearchHint'))}</p><div id="ls-list"></div><div id="ls-prev" class="lyr-prev on-s" style="display:none;margin-top:10px"></div>`,
     buttons: [{ label: t('cancel'), value: false }, { label: t('useLyrics'), cls: 'filled', run: () => (picked ? true : (snack(t('pickResult')), false)) }],
     onMount: (ov) => {
       const q = $('#ls-q', ov);
       q.onkeydown = (e) => { if (e.key === 'Enter') run(ov, q.value); };
-      $('#ls-list', ov).onclick = (e) => {
+      $('#ls-list', ov).onclick = async (e) => {
         const el = e.target.closest('[data-i]');
         if (!el) return;
         const r = results[+el.dataset.i];
-        picked = r.syncedLyrics || r.plainLyrics;
         $$('.result', ov).forEach((y) => y.classList.toggle('on', y === el));
-        const pv = $('#ls-prev', ov);
-        pv.style.display = picked ? 'block' : 'none';
-        pv.textContent = picked || '';
+        picked = null;
+        if (!r.loaded) {
+          const my = ++seq;
+          const pv = $('#ls-prev', ov);
+          pv.style.display = 'block';
+          pv.textContent = t('searching');
+          try { Object.assign(r, await invoke('fetch_lyrics_hit', { source: r.source, reference: r.ref })); } catch (err) { if (my === seq) pv.textContent = errMsg(err); return; }
+          $('.badge-slot', el).innerHTML = badge(r);
+          if (my !== seq) return;
+        }
+        show(ov, r);
       };
       run(ov, q0);
     },
   });
   if (ok && picked) onPick(picked);
+}
+async function mergeLrc(ids) {
+  const list = (ids || S.tracks.map((y) => y.id)).filter((id) => QUICK.lrcOnly(S.byId.get(id) || { missing: [] }));
+  if (!list.length) return snack(t('lrcNone'));
+  const after = { keep: t('lrcKeep'), hide: t('lrcHide'), delete: t('lrcDelete') }[S.settings.lrcAfterMerge || 'hide'];
+  if (!(await confirmBox(t('lrcMerge'), t('lrcMergeQ', { n: list.length, after }), t('lrcMerge')))) return;
+  try { const n = await invoke('merge_lrc_files', { ids: list }); snack(t('lrcMerged', { n })); renderAll(); } catch (e) { snack(errMsg(e), 'bad'); }
 }
 async function batchEdit(ids) {
   const rows = ['artist', 'albumArtist', 'album', 'year', 'genre', 'composer', 'label', 'discTotal', 'trackTotal'];
@@ -1724,6 +1755,7 @@ document.addEventListener('click', async (e) => {
     case 'reveal': return opener()?.revealItemInDir(x.path).catch((err) => snack(errMsg(err), 'bad'));
     case 'open-mb': return opener()?.openUrl(`https://musicbrainz.org/recording/${x.tags.mbRecordingId}`);
     case 'reload-track': { const nt = await invoke('reload_track', { id: x.id }); upsert(nt); renderSheet(); paintRows(); return; }
+    case 'merge-lrc': return mergeLrc();
     case 'rv-accept': return reviewDecide('accept');
     case 'rv-reject': return reviewDecide('reject');
     case 'rv-skip': return reviewDecide('skip');
