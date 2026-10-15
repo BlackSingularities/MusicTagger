@@ -77,16 +77,26 @@ Przy pierwszym uruchomieniu aplikacja otwiera ekran uprawnienia **„Dostęp do 
 
 Bez stałego klucza każdy build jest podpisany innym, jednorazowym kluczem, więc automatyczna aktualizacja się nie powiedzie – trzeba odinstalować poprzednią wersję. Żeby aktualizacje instalowały się normalnie, utwórz klucz raz:
 
-```bash
+Klucz generuje się **na własnym komputerze** (nie w repozytorium i nie w CI) narzędziem `keytool` z dowolnego JDK. Na Windows jest ono dołączone do Android Studio: `C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe`; bez Android Studio wystarczy JDK (np. Temurin 17).
+
+PowerShell, w katalogu poza repozytorium (np. `C:\Users\<Ty>\Klucze`):
+
+```powershell
 keytool -genkeypair -v -keystore musictagger.jks -alias musictagger -keyalg RSA -keysize 2048 -validity 10000
-base64 -w0 musictagger.jks   # na Windows: certutil -encode musictagger.jks out.txt
+# hasło zapamiętaj; pola imię/organizacja mogą zostać puste, na końcu potwierdź „yes”
+
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("musictagger.jks")) | Set-Clipboard
 ```
 
-Następnie w GitHub → Settings → Secrets and variables → Actions dodaj:
+Linux/macOS: `base64 -w0 musictagger.jks`. (Windowsowe `certutil -encode` **nie nadaje się** – dodaje nagłówki `-----BEGIN…` i łamie linie, a workflow robi `base64 -d`.)
 
-- `ANDROID_KEYSTORE_BASE64`: wynik `base64`,
-- `ANDROID_KEYSTORE_PASSWORD`: hasło,
+Następnie w GitHub → Settings → Secrets and variables → Actions → *New repository secret* dodaj trzy sekrety:
+
+- `ANDROID_KEYSTORE_BASE64`: zawartość schowka (base64 w jednej linii),
+- `ANDROID_KEYSTORE_PASSWORD`: hasło podane przy tworzeniu klucza,
 - `ANDROID_KEY_ALIAS`: `musictagger`.
+
+Plik `musictagger.jks` zachowaj i zrób kopię zapasową – jego utrata oznacza, że zainstalowanych aplikacji nie da się już zaktualizować, tylko przeinstalować. Pierwszą wersję podpisaną nowym kluczem trzeba zainstalować ręcznie (odinstalowując wcześniejszą), kolejne zaktualizują się już same.
 
 ## Budowanie lokalne
 
