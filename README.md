@@ -17,18 +17,33 @@ Aplikacja na **Windows** i **Androida** (Rust + Tauri 2), która skanuje folder 
 
 ## Funkcje
 
-- Biblioteka z oceną kompletności każdego utworu (0–100), filtrami (brak tagów, okładki, tekstu, tekstu z czasami, problemy), wyszukiwarką, sortowaniem i widokiem albumów.
-- **Uzupełnij automatycznie** dla całej biblioteki lub zaznaczonych utworów. Pewne dopasowania mogą być zapisywane automatycznie (próg ustawiany w Ustawieniach).
-- **Przegląd propozycji**: lista zmian pole po polu z możliwością edycji i odznaczania, wybór okładki, inne dopasowania i zbiorcze „Zastosuj pewne”.
-- **Ręczna edycja** tagów, **edycja zbiorcza** (np. album dla wielu plików, kolejna numeracja), wyszukiwanie ręczne.
-- **Okładki**: wyszukiwanie w sieci, z pliku, z adresu URL, eksport i usuwanie. Okładki są skalowane i zapisywane jako JPEG. Opcjonalnie zapisywany jest też `cover.jpg` w folderze.
-- **Teksty**: wyszukiwarka LRCLIB, edytor, podgląd karaoke z odtwarzaczem, korekta przesunięcia (±0,1 / ±0,5 s) i ręczna synchronizacja przyciskiem „Wstaw czas”.
-- **Zmiana nazw plików** według wzorca (`%artist% - %title%`, `%track%`…) z podglądem i wykrywaniem konfliktów. Plik `.lrc` jest przenoszony razem z utworem.
-- **Historia zmian z cofaniem**: pojedyncze pliki lub całe operacje (Ctrl+Z).
-- **Duplikaty**: wskazuje plik o najlepszej jakości.
-- **Raport CSV** z brakami.
-- Motyw ciemny lub jasny, kolory akcentu, język polski i angielski, przeciąganie folderu na okno, skróty klawiszowe, układ dopasowany do telefonu (przycisk Wstecz, długie przytrzymanie zaznacza utwór).
-- Sprawdzanie aktualizacji (GitHub Releases).
+Interfejs w stylu **Material Design 3** z czterema widokami: **Biblioteka**, **Weryfikacja**, **Historia** i **Ustawienia**.
+
+- **Biblioteka:**
+  - podsumowanie kompletności (tagi, okładki, teksty z czasami);
+  - szybkie filtry: brak tagów, brak okładki, brak tekstu, bez czasów, propozycje, duplikaty, problemy;
+  - filtry zaawansowane: czego brakuje, status, format, folder, zakres kompletności;
+  - wyszukiwarka, sortowanie, widok albumów.
+- **Wczytywanie:**
+  - folder z podfolderami albo bez nich (przełącznik „Uwzględniaj podfoldery”);
+  - wybrane pliki;
+  - dokładanie kolejnych folderów i plików do listy;
+  - przeciąganie na okno.
+- **Weryfikacja:**
+  - lista propozycji z filtrami (pewne / do sprawdzenia, rodzaj zmian, rozpoznane po dźwięku) i porównanie „przed / po”;
+  - w zmianach tagów widać tylko zmieniane pola: nowa wartość obok starej, przekreślonej na czerwono;
+  - każde pole można odznaczyć albo poprawić ręcznie;
+  - okładki z **rzeczywistą rozdzielczością** i wielkością pliku, porównane z obecną;
+  - skróty: **A** akceptuj, **D** odrzuć, **S** pomiń, **←/→** poprzednia/następna; po każdej decyzji widok przechodzi do następnej propozycji;
+  - „Akceptuj pewne” zbiorczo i lista pól, których nigdy nie zmieniać (np. gatunek).
+- **Zapis w tle:** zaakceptowane zmiany trafiają do kolejki, która zapisuje kilka plików równolegle. Można w tym czasie dalej weryfikować.
+- **Edycja utworu:** panel z kartami Tagi / Okładka / Tekst / Plik. „Zapisz i dalej” (Enter) przechodzi od razu do kolejnego utworu.
+- **Teksty z czasami w środku pliku:** MP3 (USLT + natywna ramka SYLT), FLAC/OGG/OPUS (LYRICS), M4A (©lyr). Pliki `.lrc` są opcjonalne.
+- Podgląd karaoke z odtwarzaczem, korekta przesunięcia i ręczna synchronizacja.
+- Zmiana nazw plików według wzorca, edycja zbiorcza, numeracja, okładka dla wielu plików.
+- Historia z cofaniem (pojedyncze pliki lub całe operacje), raport CSV.
+- Motyw ciemny, jasny lub systemowy, 5 kolorów, PL/EN.
+- Sprawdzanie aktualizacji.
 
 Obsługiwane formaty: MP3, FLAC, M4A/MP4/AAC/ALAC, OGG, OPUS, WAV, WavPack, APE, AIFF, MPC, Speex.
 

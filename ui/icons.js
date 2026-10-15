@@ -34,6 +34,9 @@ const P = {
   chevronLeft: '<path d="M15 18l-6-6 6-6"/>',
   chevronRight: '<path d="M9 18l6-6-6-6"/>',
   chevronDown: '<path d="M6 9l6 6 6-6"/>',
+  chevronUp: '<path d="M6 15l6-6 6 6"/>',
+  tune: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14"/><path d="M12 17h.01"/>',
   arrowUp: '<path d="M12 19V5M5 12l7-7 7 7"/>',
   home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
@@ -60,4 +63,8 @@ export function icon(name, cls = '') {
   return `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || P.info}</svg>`;
 }
 
-export const LOGO = `<svg viewBox="0 0 1024 1024" class="logo" aria-hidden="true"><defs><linearGradient id="lg1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset=".55" stop-color="#6d28d9"/><stop offset="1" stop-color="#db2777"/></linearGradient></defs><rect x="32" y="32" width="960" height="960" rx="220" fill="url(#lg1)"/><circle cx="470" cy="540" r="300" fill="#13111d"/><circle cx="470" cy="540" r="96" fill="#f472b6"/><circle cx="470" cy="540" r="26" fill="#13111d"/><path d="M640 170 L860 170 Q900 170 900 210 L900 390 Q900 420 878 440 L700 610 Q676 632 652 608 L560 516 Q538 494 560 470 L620 410 L620 190 Q620 170 640 170 Z" fill="#fff"/><circle cx="820" cy="250" r="36" fill="#7c3aed"/></svg>`;
+let logoN = 0;
+export const logo = () => {
+  const id = 'lg' + ++logoN;
+  return `<svg viewBox="0 0 1024 1024" class="logo" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset=".55" stop-color="#6d28d9"/><stop offset="1" stop-color="#db2777"/></linearGradient></defs><rect x="32" y="32" width="960" height="960" rx="220" fill="url(#${id})"/><circle cx="470" cy="540" r="300" fill="#13111d"/><circle cx="470" cy="540" r="96" fill="#f472b6"/><circle cx="470" cy="540" r="26" fill="#13111d"/><path d="M640 170 L860 170 Q900 170 900 210 L900 390 Q900 420 878 440 L700 610 Q676 632 652 608 L560 516 Q538 494 560 470 L620 410 L620 190 Q620 170 640 170 Z" fill="#fff"/><circle cx="820" cy="250" r="36" fill="#7c3aed"/></svg>`;
+};
