@@ -43,7 +43,7 @@ Interfejs w stylu **Material Design 3** z czterema widokami: **Biblioteka**, **W
 - Zmiana nazw plików według wzorca, edycja zbiorcza, numeracja, okładka dla wielu plików.
 - Historia z cofaniem (pojedyncze pliki lub całe operacje), raport CSV.
 - Motyw ciemny, jasny lub systemowy, 5 kolorów, PL/EN.
-- Sprawdzanie aktualizacji.
+- **Automatyczne aktualizacje:** aplikacja sprawdza nowe wydania na GitHubie, pobiera je w tle i instaluje po jednym kliknięciu (Windows – instalacja z restartem aplikacji, Android – systemowy instalator pakietu). Można je wyłączyć w Ustawieniach → O aplikacji.
 
 Obsługiwane formaty: MP3, FLAC, M4A/MP4/AAC/ALAC, OGG, OPUS, WAV, WavPack, APE, AIFF, MPC, Speex.
 
@@ -60,13 +60,22 @@ Każdy push buduje aplikację automatycznie (GitHub Actions → **Releases**):
 
 Push na `main` publikuje wydanie „Latest”. Push na inną gałąź publikuje wydanie testowe (pre-release).
 
+### Automatyczne aktualizacje
+
+Aplikacja pyta GitHuba o ostatnie wydanie „Latest” (chwilę po starcie i co 6 godzin), pobiera pasujący plik do swojego folderu danych i pokazuje pasek **„Aktualizacja gotowa do instalacji”**:
+
+- **Windows** – instalator uruchamia się w trybie pasywnym (`/UPDATE /P /R`), aplikacja zamyka się i po instalacji startuje ponownie. Wersje testowe (pre-release) są pomijane.
+- **Android** – otwiera się systemowy instalator pakietu. Za pierwszym razem Android poprosi o zgodę **„Instalowanie nieznanych aplikacji”** dla MusicTaggera. Warunkiem jest stały klucz podpisu (niżej) – inaczej system odrzuci aktualizację jako podpisaną innym kluczem.
+
+Przełącznik **Ustawienia → O aplikacji → Automatyczne aktualizacje** wyłącza pobieranie; przycisk „Sprawdź aktualizacje” działa wtedy ręcznie.
+
 ### Android: dostęp do plików
 
 Przy pierwszym uruchomieniu aplikacja otwiera ekran uprawnienia **„Dostęp do wszystkich plików”**. Bez niego Android nie pozwala zapisywać tagów w plikach muzycznych. Foldery wybiera się wbudowaną przeglądarką: Muzyka, Pobrane, karta SD.
 
 ### Android: stały klucz podpisu (zalecane)
 
-Bez stałego klucza każdy build jest podpisany innym, jednorazowym kluczem, więc przed aktualizacją trzeba odinstalować poprzednią wersję. Żeby aktualizacje instalowały się normalnie, utwórz klucz raz:
+Bez stałego klucza każdy build jest podpisany innym, jednorazowym kluczem, więc automatyczna aktualizacja się nie powiedzie – trzeba odinstalować poprzednią wersję. Żeby aktualizacje instalowały się normalnie, utwórz klucz raz:
 
 ```bash
 keytool -genkeypair -v -keystore musictagger.jks -alias musictagger -keyalg RSA -keysize 2048 -validity 10000

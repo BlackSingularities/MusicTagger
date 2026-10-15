@@ -159,6 +159,137 @@ async fn check_update() -> Result<UpdateInfo, String> {
     })
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct UpdateProgress {
+    received: u64,
+    total: u64,
+    done: bool,
+}
+
+fn safe_file_name(url: &str) -> String {
+    let raw = url.rsplit('/').next().unwrap_or("MusicTagger-update");
+    let name: String = raw
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        .collect();
+    if name.len() < 3 {
+        "MusicTagger-update".into()
+    } else {
+        name
+    }
+}
+
+/// Pobiera plik aktualizacji do katalogu danych; po drodze wysyła zdarzenia `update-progress`.
+#[tauri::command]
+async fn download_update(app: AppHandle, url: String) -> Result<String, String> {
+    use tokio::io::AsyncWriteExt;
+
+    if !url.starts_with("https://") {
+        return Err("Nieprawidłowy adres aktualizacji".into());
+    }
+    let dir = {
+        let st = app.state::<Arc<AppState>>();
+        st.data_dir.join("updates")
+    };
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let name = safe_file_name(&url);
+    let path = dir.join(&name);
+    // Zostaje tylko aktualnie pobierany plik – starsze wersje zajmują miejsce niepotrzebnie.
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            if e.file_name() != std::ffi::OsStr::new(&name) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+
+    let resp = sources::http::CLIENT
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(3600))
+        .send()
+        .await
+        .map_err(|e| format!("Nie udało się pobrać aktualizacji: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("Nie udało się pobrać aktualizacji (HTTP {})", resp.status()));
+    }
+    let total = resp.content_length().unwrap_or(0);
+    // Jeśli ten sam plik jest już pobrany w całości, nie pobieramy go drugi raz.
+    if total > 0 {
+        if let Ok(meta) = std::fs::metadata(&path) {
+            if meta.len() == total {
+                let _ = app.emit("update-progress", UpdateProgress { received: total, total, done: true });
+                return Ok(path.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    let part = dir.join(format!("{name}.part"));
+    let mut file = tokio::fs::File::create(&part).await.map_err(|e| e.to_string())?;
+    let mut resp = resp;
+    let mut received: u64 = 0;
+    let mut last = std::time::Instant::now();
+    let _ = app.emit("update-progress", UpdateProgress { received: 0, total, done: false });
+    loop {
+        let chunk = resp.chunk().await.map_err(|e| format!("Przerwane pobieranie: {e}"))?;
+        let Some(chunk) = chunk else { break };
+        file.write_all(&chunk).await.map_err(|e| e.to_string())?;
+        received += chunk.len() as u64;
+        if last.elapsed() >= std::time::Duration::from_millis(200) {
+            last = std::time::Instant::now();
+            let _ = app.emit("update-progress", UpdateProgress { received, total, done: false });
+        }
+    }
+    file.flush().await.map_err(|e| e.to_string())?;
+    drop(file);
+    if total > 0 && received != total {
+        let _ = std::fs::remove_file(&part);
+        return Err("Pobrany plik jest niekompletny".into());
+    }
+    let _ = std::fs::remove_file(&path);
+    std::fs::rename(&part, &path).map_err(|e| e.to_string())?;
+    let _ = app.emit("update-progress", UpdateProgress { received, total: received, done: true });
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Uruchamia pobrany instalator. Windows: instalacja w tle i ponowne uruchomienie
+/// aplikacji; Android: systemowy instalator pakietu (wymaga potwierdzenia).
+#[tauri::command]
+async fn install_update(app: AppHandle, path: String) -> Result<(), String> {
+    if !Path::new(&path).is_file() {
+        return Err("Nie znaleziono pobranego pliku aktualizacji".into());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        // /UPDATE – tryb aktualizacji (bez pytań o katalog), /P – pasywny, /R – restart aplikacji.
+        std::process::Command::new(&path)
+            .args(["/UPDATE", "/P", "/R"])
+            .creation_flags(DETACHED_PROCESS)
+            .spawn()
+            .map_err(|e| format!("Nie udało się uruchomić instalatora: {e}"))?;
+        let h = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+            h.exit(0);
+        });
+        Ok(())
+    }
+    #[cfg(target_os = "android")]
+    {
+        let _ = &app;
+        // Odbiera to MainActivity i uruchamia systemowy instalator pakietu.
+        let uri = format!("musictagger://install?path={}", urlencoding::encode(&path));
+        tauri_plugin_opener::open_url(uri, None::<&str>).map_err(|e| e.to_string())
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "android")))]
+    {
+        let _ = &app;
+        tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| e.to_string())
+    }
+}
+
 // ───────────────────────────── Przeglądanie folderów ─────────────────────────────
 
 #[derive(Serialize)]
@@ -1017,6 +1148,8 @@ pub fn run() {
             save_settings,
             app_info,
             check_update,
+            download_update,
+            install_update,
             get_roots,
             list_dirs,
             storage_access,

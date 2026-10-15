@@ -46,6 +46,10 @@ pub struct Settings {
 
     // Porządkowanie nazw
     pub rename_pattern: String,
+
+    // Aktualizacje
+    /// Samo pobieranie nowych wersji z GitHub Releases (instalację potwierdza użytkownik).
+    pub auto_update: bool,
 }
 
 impl Default for Settings {
@@ -82,6 +86,7 @@ impl Default for Settings {
             embed_lyrics: true,
             write_lrc_file: false,
             rename_pattern: "%artist% - %title%".into(),
+            auto_update: true,
         }
     }
 }

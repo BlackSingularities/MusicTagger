@@ -17,12 +17,26 @@ perms = [
     '<uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />',
     '<uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />',
     '<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />',
+    '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />',
 ]
 missing = [p for p in perms if re.search(r'android:name="([^"]+)"', p).group(1) not in xml]
 if missing:
     xml = re.sub(r"(<application)", "\n    ".join(missing) + "\n\n    \\1", xml, count=1)
 if "requestLegacyExternalStorage" not in xml:
     xml = xml.replace("<application", '<application android:requestLegacyExternalStorage="true"', 1)
+
+# Odbiór `musictagger://install?path=…` – tym aplikacja prosi MainActivity
+# o uruchomienie systemowego instalatora pobranej aktualizacji.
+install_filter = """
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="musictagger" android:host="install" />
+            </intent-filter>
+"""
+if 'android:scheme="musictagger"' not in xml:
+    xml = xml.replace("</activity>", install_filter + "        </activity>", 1)
 manifest.write_text(xml, encoding="utf-8")
 
 acts = list(gen.glob("java/**/MainActivity.kt"))

@@ -37,9 +37,11 @@ const S = {
   visible: [],
   history: null,
   storageOk: true,
+  update: null,
   rv: { conf: 'all', types: new Set(), q: '', active: null, sel: new Set(), detail: false, skip: new Set(JSON.parse(store('skipFields') || '[]')) },
 };
 const isMobile = () => matchMedia('(max-width: 760px)').matches;
+const RELEASES_URL = 'https://github.com/BlackSingularities/MusicTagger/releases/latest';
 const isAndroid = () => S.info.platform === 'android';
 
 function store(k, v) {
@@ -487,6 +489,17 @@ function renderJobs() {
     if (!j?.running) continue;
     const pct = j.total ? (j.done / j.total) * 100 : 0;
     html += `<div class="job">${icon(kind === 'apply' ? 'download' : 'sparkles', 'sm')}<span>${esc(t(kind === 'apply' ? 'applying' : 'analyzing', { done: j.done, total: j.total }))}</span><div class="lp"><i style="width:${pct}%"></i></div><button class="btn text sm" data-act="cancel">${esc(t('stop'))}</button></div>`;
+  }
+  const u = S.update;
+  if (u && u.phase !== 'idle') {
+    if (u.phase === 'downloading') {
+      const pct = u.total ? (u.received / u.total) * 100 : 0;
+      html += `<div class="job">${icon('download', 'sm')}<span>${esc(t('updDownloading', { v: u.latest }))}</span><div class="lp ${u.total ? '' : 'indet'}"><i style="width:${pct}%"></i></div><span class="t-body-s muted">${u.total ? Math.round(pct) + '%' : ''}</span></div>`;
+    } else if (u.phase === 'ready') {
+      html += `<div class="job"><span class="grow">${esc(t('updReady', { v: u.latest }))}</span><button class="btn filled sm has-ic" data-act="upd-install">${icon('update')}${esc(t('updInstall'))}</button><button class="btn text sm" data-act="upd-later">${esc(t('updLater'))}</button></div>`;
+    } else if (u.phase === 'failed') {
+      html += `<div class="job"><span class="grow">${esc(t('updFailed'))}</span><button class="btn text sm" data-act="upd-manual">${esc(t('download'))}</button><button class="btn text sm" data-act="upd-later">${esc(t('updLater'))}</button></div>`;
+    }
   }
   box.innerHTML = html;
 }
@@ -1251,6 +1264,7 @@ function renderSettings(v) {
       ${row(t('pattern'), esc(t('patternD')), `<input class="inp mono" data-text="renamePattern" value="${esc(s.renamePattern || '')}">`)}</div>
     <div class="list-card"><h2>${icon('info')}${esc(t('sAbout'))}</h2>
       ${row('MusicTagger ' + S.info.version, esc(t('aboutD')), `<button class="btn tonal sm has-ic" id="chk-upd">${icon('update')}${esc(t('checkUpdates'))}</button>`)}
+      ${swRow('autoUpdate', t('autoUpdate'), t('autoUpdateD'))}
       ${row(t('shortcuts'), esc(t('shortcutsD')), '')}
       ${row(t('dataDir'), `<span class="mono selectable">${esc(S.info.dataDir || '')}</span>`, '')}</div>
   </div></div>`;
@@ -1287,11 +1301,36 @@ function applyTheme() {
   document.documentElement.dataset.accent = S.settings.accent || 'violet';
 }
 async function checkUpdate(silent) {
+  const ph = S.update?.phase;
+  if (ph === 'downloading') return;
+  if (ph === 'ready') return snack(t('updReady', { v: S.update.latest }), 'info', { label: t('updInstall'), run: installUpdate });
   try {
     const u = await invoke('check_update');
-    if (u.available) snack(t('updateAvail', { v: u.latest }), 'info', { label: t('download'), run: () => opener()?.openUrl(u.download || u.url) });
-    else if (!silent) snack(t('upToDate'));
+    if (!u.available) { if (!silent) snack(t('upToDate')); return; }
+    // Przy włączonym oszczędzaniu danych nie pobieramy nic samoczynnie.
+    const saveData = navigator.connection?.saveData === true;
+    if (S.settings.autoUpdate !== false && u.download && !saveData) return downloadUpdate(u);
+    snack(t('updateAvail', { v: u.latest }), 'info', { label: t('download'), run: () => openRelease(u) });
   } catch (e) { if (!silent) snack(errMsg(e), 'bad'); }
+}
+function openRelease(u) { opener()?.openUrl((u || S.update)?.download || (u || S.update)?.url || RELEASES_URL); }
+async function downloadUpdate(u) {
+  S.update = { latest: u.latest, url: u.url, download: u.download, phase: 'downloading', received: 0, total: 0, path: null };
+  renderJobs();
+  try {
+    const path = await invoke('download_update', { url: u.download });
+    S.update = { ...S.update, phase: 'ready', path };
+    snack(t('updReady', { v: u.latest }), 'info', { label: t('updInstall'), run: installUpdate });
+  } catch (e) {
+    console.error(e);
+    S.update = { ...S.update, phase: 'failed' };
+  }
+  renderJobs();
+}
+async function installUpdate() {
+  const u = S.update;
+  if (!u || u.phase !== 'ready') return;
+  try { await invoke('install_update', { path: u.path }); } catch (e) { snack(errMsg(e), 'bad'); openRelease(u); }
 }
 
 // ═════════════════════════════ Akcje ═════════════════════════════
@@ -1689,6 +1728,9 @@ document.addEventListener('click', async (e) => {
     case 'sel-rename': return renameDialog([...S.selected]);
     case 'sel-more': return selMore(el);
     case 'cancel': return invoke('cancel_job');
+    case 'upd-install': return installUpdate();
+    case 'upd-manual': openRelease(); S.update = null; return renderJobs();
+    case 'upd-later': S.update = null; return renderJobs();
     case 'perm-check': S.storageOk = await invoke('storage_access'); return renderView();
     case 'analyze-all': go('library'); return analyzeIds(S.tracks.filter((y) => y.score < 100).map((y) => y.id));
     case 'sheet-close': return closeSheet();
@@ -1838,7 +1880,14 @@ async function init() {
     if (files.length === paths.length) runScan(t('nFiles', { n: files.length }), () => invoke('scan_files', { paths: files, append: S.tracks.length > 0 }), S.tracks.length > 0);
     else scanFolder(paths.find((p) => !files.includes(p)));
   });
-  const last = store('updChecked');
-  if (!last || Date.now() - +last > 86400000) { store('updChecked', String(Date.now())); setTimeout(() => checkUpdate(true), 4000); }
+  listen('update-progress', (e) => {
+    if (!S.update || S.update.phase !== 'downloading') return;
+    S.update.received = e.payload.received;
+    S.update.total = e.payload.total;
+    schedule('jobs');
+  });
+  // Sprawdzenie krótko po starcie, a potem co 6 godzin, dopóki aplikacja działa.
+  setTimeout(() => checkUpdate(true), 6000);
+  setInterval(() => checkUpdate(true), 6 * 3600 * 1000);
 }
 init();
