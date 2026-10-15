@@ -439,6 +439,10 @@ body.has-jobs .rv-body { padding-bottom: 128px; }
 .diff .old.none { text-decoration: none; color: var(--outline); font-style: italic; }
 .diff tr.off .new, .diff tr.off .old { opacity: .4; text-decoration: line-through; color: var(--on-surface-var); }
 .diff .cbc { width: 40px; }
+.diff tr.same .new { color: var(--on-surface); font-weight: 400; }
+.diff tr.same .cb { opacity: .35; }
+.diff .new [contenteditable]:empty::before { content: attr(data-ph); color: var(--outline); font-style: italic; font-weight: 400; }
+.ta.lyr-edit { min-height: 160px; max-height: 360px; }
 .diff-wrap { border: 1px solid var(--outline-var); border-radius: var(--r-md); overflow: hidden; }
 
 /* Okładki – porównanie */

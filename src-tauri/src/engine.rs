@@ -317,15 +317,14 @@ pub async fn analyze(track: &Track, settings: &Settings, manual: Option<(String,
         }
     }
 
-    if scored.is_empty() {
-        return Analysis { offline: all_offline(&warnings), proposal: None, warnings };
-    }
-
     // 4) Wybór najlepszego nagrania, potem najlepszego wydania w jego obrębie.
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    let best_score = scored[0].0;
+    let best_score = scored.first().map(|x| x.0).unwrap_or(0.0);
     if best_score < 0.55 {
-        return Analysis { offline: all_offline(&warnings), proposal: None, warnings };
+        // Brak pewnego dopasowania – i tak uzupełniamy tekst/okładkę na podstawie obecnych tagów.
+        let offline = all_offline(&warnings);
+        let proposal = if offline { None } else { from_own_tags(track, &q, settings, &warnings).await };
+        return Analysis { offline, proposal, warnings };
     }
     let best_title = hints::normalize_title(scored[0].1.fields.title.as_deref().unwrap_or(""));
     let best_artist = scored[0].1.fields.artist.clone().unwrap_or_default();
@@ -394,10 +393,48 @@ pub async fn analyze(track: &Track, settings: &Settings, manual: Option<(String,
         alternatives,
         chosen: 0,
         notes: warnings.clone(),
+        sources: vec![],
     };
     let supporting: Vec<Candidate> = scored.iter().filter(|(_, c)| same(c)).map(|(_, c)| c.clone()).collect();
     finalize(track, &mut proposal, chosen, &supporting, settings, &q).await;
     Analysis { proposal: Some(proposal), warnings, offline: false }
+}
+
+/// Źródło „kandydata” zbudowanego z obecnych tagów i nazwy pliku.
+pub const OWN_TAGS: &str = "tags";
+
+/// Propozycja bez dopasowania w bazach: obecne tagi (luki z nazwy pliku) + tekst i okładka z sieci.
+async fn from_own_tags(track: &Track, q: &Query, settings: &Settings, warnings: &[String]) -> Option<Proposal> {
+    let (title, artist) = (q.title.clone()?, q.artist.clone()?);
+    let mut fields = track.tags.clone();
+    if fields.title.as_deref().map(hints::is_garbage_title).unwrap_or(true) {
+        fields.title = Some(title);
+    }
+    if fields.artist.as_deref().map(hints::is_garbage_artist).unwrap_or(true) {
+        fields.artist = Some(artist);
+    }
+    fields.album = fields.album.or(q.album.clone());
+    fields.year = fields.year.or(q.year.clone());
+    fields.track = fields.track.or(q.track);
+    let chosen = Candidate { source: OWN_TAGS.into(), fields, duration: Some(track.duration), ..Default::default() };
+    let mut proposal = Proposal {
+        track_id: track.id.clone(),
+        confidence: 0.5,
+        method: OWN_TAGS.into(),
+        changes: vec![],
+        covers: vec![],
+        cover_choice: None,
+        cover_enabled: false,
+        lyrics: None,
+        lyrics_enabled: false,
+        alternatives: vec![],
+        chosen: 0,
+        notes: warnings.to_vec(),
+        sources: vec![],
+    };
+    finalize(track, &mut proposal, chosen, &[], settings, q).await;
+    let work = proposal.changes.iter().any(|c| c.enabled) || proposal.cover_enabled || proposal.lyrics_enabled;
+    work.then_some(proposal)
 }
 
 /// Uzupełnia wybranego kandydata (szczegóły wydania, okładki, tekst) i liczy zmiany.
@@ -465,7 +502,9 @@ pub async fn finalize(
         c.fields.album.as_deref().map(|a| hints::sim_norm(&hints::normalize_title(a), norm) > 0.85).unwrap_or(false)
     };
     supporting.sort_by_key(|c| !album_of(c, &album_norm));
+    let mut sources = vec![chosen.source.clone()];
     for c in supporting.iter().filter(|c| c.source != chosen.source) {
+        let before = fields.clone();
         if settings.mix_sources && fields.album.is_none() {
             if let Some(a) = &c.fields.album {
                 fields.album = Some(a.clone());
@@ -518,6 +557,9 @@ pub async fn finalize(
                     *mine = Some(t.clone());
                 }
             }
+        }
+        if fields != before && !sources.contains(&c.source) {
+            sources.push(c.source.clone());
         }
         if let Some(url) = &c.cover_url {
             let cc = CoverCandidate {
@@ -603,6 +645,7 @@ pub async fn finalize(
     }
 
     proposal.changes = build_changes(&track.tags, &fields, settings);
+    proposal.sources = sources;
 
     let need_cover = match &track.cover {
         None => true,
@@ -630,11 +673,30 @@ pub async fn finalize(
     let has_any = track.lyrics.is_some() || from_lrc.is_some();
     let need_online = !has_any || (settings.prefer_synced && !has_synced);
     if settings.fetch_lyrics && need_online {
-        let artist = fields.artist.clone().or(track.tags.artist.clone()).or(q.artist.clone());
-        let title = fields.title.clone().or(track.tags.title.clone()).or(q.title.clone());
-        if let (Some(a), Some(t)) = (artist, title) {
-            let lq = lyrics::LyricsQuery { artist: &a, title: &t, album: fields.album.as_deref(), duration: track.duration };
-            let (found, errs) = lyrics::find(&lq, settings, has_any).await;
+        // Kolejne warianty (wynik łączony, obecne tagi, nazwa pliku) – aż któryś da tekst.
+        let mut tries: Vec<(String, String)> = vec![];
+        for (a, t) in [
+            (fields.artist.clone(), fields.title.clone()),
+            (track.tags.artist.clone(), track.tags.title.clone()),
+            (q.artist.clone(), q.title.clone()),
+        ] {
+            if let (Some(a), Some(t)) = (a, t) {
+                let key = (hints::normalize(&a), hints::normalize(&t));
+                if !key.0.is_empty() && !key.1.is_empty() && !tries.iter().any(|(x, y)| (hints::normalize(x), hints::normalize(y)) == key) {
+                    tries.push((a, t));
+                }
+            }
+        }
+        let mut result = (None, vec![]);
+        for (a, t) in tries.iter().take(3) {
+            let lq = lyrics::LyricsQuery { artist: a, title: t, album: fields.album.as_deref(), duration: track.duration };
+            result = lyrics::find(&lq, settings, has_any).await;
+            if result.0.is_some() || all_offline(&result.1) {
+                break;
+            }
+        }
+        {
+            let (found, errs) = result;
             match found {
                 Some(l) => {
                     let useful = if has_any { l.synced.is_some() } else { l.plain.is_some() || l.synced.is_some() };

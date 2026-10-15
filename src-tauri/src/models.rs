@@ -207,6 +207,9 @@ pub struct Proposal {
     pub alternatives: Vec<Candidate>,
     pub chosen: usize,
     pub notes: Vec<String>,
+    /// Źródła, z których złożono wynik (tagi, okładka, tekst) – wynik łączony.
+    #[serde(default)]
+    pub sources: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

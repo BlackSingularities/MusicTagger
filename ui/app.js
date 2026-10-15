@@ -37,7 +37,9 @@ const S = {
   visible: [],
   history: null,
   storageOk: true,
-  rv: { conf: 'all', types: new Set(), q: '', active: null, sel: new Set(), detail: false, skip: new Set(JSON.parse(store('skipFields') || '[]')) },
+  rv: { conf: 'all', types: new Set(), q: '', active: null, sel: new Set(), detail: false, skip: new Set(JSON.parse(store('skipFields') || '[]')), hideSame: !!store('rvHideSame') },
+  /** Wynik łączony sprzed wyboru innego dopasowania (do przywrócenia). */
+  rvOrig: new Map(),
 };
 const isMobile = () => matchMedia('(max-width: 760px)').matches;
 const isAndroid = () => S.info.platform === 'android';
@@ -259,6 +261,7 @@ function upsert(tr, proposal) {
   if (proposal) {
     applySkipFields(proposal);
     S.proposals.set(tr.id, proposal);
+    S.rvOrig.delete(tr.id);
   } else if (!['proposed', 'error', 'queued', 'working'].includes(tr.status)) S.proposals.delete(tr.id);
 }
 function replaceTrack(oldId, tr) {
@@ -977,6 +980,17 @@ function reviewList() {
   }).sort((a, b) => S.proposals.get(b.id).confidence - S.proposals.get(a.id).confidence || (a.path < b.path ? -1 : 1));
 }
 const newVal = (p, f, x) => p.changes.find((c) => c.field === f && c.enabled)?.new ?? x.tags[f];
+/** Wszystkie pola tagów w edytorze weryfikacji (kolejność wyświetlania). */
+const RV_FIELDS = ['title', 'artist', 'album', 'albumArtist', 'year', 'track', 'trackTotal', 'disc', 'discTotal', 'genre', 'composer', 'label', 'isrc', 'bpm', 'comment', 'mbRecordingId', 'mbReleaseId'];
+const curTag = (x, f) => (x.tags[f] == null || x.tags[f] === '' ? null : String(x.tags[f]));
+const isSyncedText = (s) => /^\s*\[\d{1,3}:\d{2}/m.test(s || '');
+/** Źródła, z których złożono wynik: tagi + wybrana okładka + tekst. */
+function resultSources(p) {
+  const out = [...(p.sources || [])];
+  if (p.coverEnabled && p.covers[p.coverChoice]) out.push(p.covers[p.coverChoice].source.split(' · ')[0]);
+  if (p.lyricsEnabled && p.lyrics?.source) out.push(p.lyrics.source);
+  return [...new Set(out.map((s) => (s === 'tags' ? t('srcOwnTags') : s === 'manual' ? t('srcManual') : s)))];
+}
 function renderReview(v) {
   const all = pendingProposals();
   if (!all.length) {
@@ -1038,6 +1052,11 @@ function renderReviewPane(list) {
   const prevBody = $('.rv-body', pane);
   const scroll = prevBody?.dataset.id === x.id ? prevBody.scrollTop : 0;
   const nothing = !p.changes.length && !p.covers.length && !p.lyrics;
+  const srcs = resultSources(p);
+  const hideSame = S.rv.hideSame;
+  const rows = RV_FIELDS.filter((f) => p.changes.some((c) => c.field === f) || (!hideSame && curTag(x, f) != null) || (!hideSame && CORE.includes(f)));
+  const lyrText = p.lyrics && !p.lyrics.instrumental ? p.lyrics.synced || p.lyrics.plain || '' : x.lyrics || '';
+  const lyrProposed = !!(p.lyrics && !p.lyrics.instrumental);
   const curUrl = x.cover ? S.covers.get(x.id + ':300') : null;
   if (x.cover && curUrl === undefined) wantCover(x.id, 300);
   pane.innerHTML = `<div class="rv-body" data-id="${x.id}">
@@ -1047,24 +1066,40 @@ function renderReviewPane(list) {
         <div class="muted">${esc([newVal(p, 'artist', x), newVal(p, 'album', x), newVal(p, 'year', x)].filter(Boolean).join(' · '))}</div>
         <div class="t-body-s dim ellipsis" style="margin-top:4px" title="${esc(x.path)}">${esc(x.fileName)}</div>
         <div class="row wrap" style="margin-top:10px"><span class="conf ${confCls(p.confidence)}">${esc(t('confidenceN', { p: Math.round(p.confidence * 100) }))}</span><span class="tag">${icon(p.method === 'fingerprint' ? 'fingerprint' : 'search')}${esc(t('m_' + p.method))}</span>
-          ${alt.length > 1 ? `<button class="btn text sm has-ic" id="rv-alts">${icon('layers')}${esc(t('altN', { n: alt.length }))}</button>` : ''}</div></div></div>
+          ${alt.length > 1 || S.rvOrig.has(x.id) ? `<button class="btn text sm has-ic" id="rv-alts">${icon('layers')}${esc(t('altN', { n: alt.length }))}</button>` : ''}</div>
+        ${srcs.length ? `<div class="t-body-s muted" style="margin-top:6px">${icon('layers', 'sm')} ${esc(t(srcs.length > 1 ? 'combinedFrom' : 'resultFrom', { s: srcs.join(' + ') }))}</div>` : ''}</div></div>
     ${x.error ? `<div class="banner err">${icon('alert')}<span class="selectable t-body-s">${esc(x.error)}</span></div>` : ''}
     ${nothing ? `<p class="muted">${esc(t('nothingToChange'))}</p>` : ''}
-    ${p.changes.length ? `<div class="sec-title">${icon('tag')}<span class="grow">${esc(t('tagChanges'))} <span class="muted">${nOn}/${p.changes.length}</span></span><button class="btn text sm" id="rv-all-fields">${esc(nOn === p.changes.length ? t('noneFields') : t('allFields'))}</button></div>
-      <div class="diff-wrap"><table class="diff"><tbody>${p.changes.map((c, i) => `<tr class="${c.enabled ? '' : 'off'}">
-        <td class="cbc"><span class="cbw" data-chcb="${i}"><span class="cb ${c.enabled ? 'on' : ''}">${icon('check')}</span></span></td>
-        <td class="k">${esc(fieldLabel(c.field))}</td>
-        <td class="new"><span contenteditable="true" spellcheck="false" data-edit="${i}">${esc(c.new ?? '')}</span></td>
-        <td class="old ${c.old ? '' : 'none'}">${c.old ? esc(c.old) : esc(t('emptyVal'))}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    <div class="sec-title">${icon('tag')}<span class="grow">${esc(t('tagChanges'))} <span class="muted" id="rv-non">${nOn}/${p.changes.length}</span></span>
+      <button class="btn text sm" id="rv-hide-same">${esc(t(hideSame ? 'showAllTags' : 'hideSameTags'))}</button>
+      ${p.changes.length ? `<button class="btn text sm" id="rv-all-fields">${esc(nOn === p.changes.length ? t('noneFields') : t('allFields'))}</button>` : ''}</div>
+    <div class="diff-wrap"><table class="diff"><tbody>${rows.map((f) => {
+      const c = p.changes.find((y) => y.field === f);
+      const cur = curTag(x, f);
+      if (!c) return `<tr class="same" data-row="${f}">
+        <td class="cbc"><span class="cbw" data-chcb="${f}"><span class="cb">${icon('check')}</span></span></td>
+        <td class="k">${esc(fieldLabel(f))}</td>
+        <td class="new"><span contenteditable="true" spellcheck="false" data-edit="${f}" data-ph="${esc(t('emptyVal'))}">${esc(cur ?? '')}</span></td>
+        <td class="old none">${esc(t('unchanged'))}</td></tr>`;
+      return `<tr class="${c.enabled ? '' : 'off'}" data-row="${f}">
+        <td class="cbc"><span class="cbw" data-chcb="${f}"><span class="cb ${c.enabled ? 'on' : ''}">${icon('check')}</span></span></td>
+        <td class="k">${esc(fieldLabel(f))}</td>
+        <td class="new"><span contenteditable="true" spellcheck="false" data-edit="${f}" data-ph="${esc(t('emptyVal'))}">${esc(c.new ?? '')}</span></td>
+        <td class="old ${c.old ? '' : 'none'}">${c.old ? esc(c.old) : esc(t('emptyVal'))}</td></tr>`;
+    }).join('')}</tbody></table></div>
     ${p.covers.length ? `<div class="sec-title">${icon('image')}<span class="grow">${esc(t('coverSec'))}</span><span class="t-body-s muted">${esc(p.coverEnabled ? (x.cover ? t('willReplace') : t('willAdd')) : t('willKeep'))}</span><button class="switch ${p.coverEnabled ? 'on' : ''}" id="rv-cover-on"></button></div>
       <div class="covers"><div class="cv current"><div class="img" ${x.cover ? `data-cover="${x.id}:300"` : ''}>${curUrl ? `<img src="${curUrl}" alt="">` : icon(x.cover ? 'disc' : 'image')}</div>
           <div class="src">${esc(t('currentCover'))}</div><div class="res ${x.cover && x.cover.width < min ? 'low' : ''}">${x.cover ? `${x.cover.width}×${x.cover.height} px` : esc(t('none'))}</div></div>
         <div class="arrow-sep">${icon('chevronRight', 'lg')}</div>
         ${p.covers.map((c, i) => { coverRes(c.url); return `<div class="cv ${p.coverEnabled && p.coverChoice === i ? 'on' : ''}" data-cpick="${i}"><span class="check">${icon('check')}</span><div class="img"><img src="${esc(c.thumb)}" alt="" loading="lazy" onerror="this.closest('.cv').style.display='none'"></div>
           <div class="src ellipsis" title="${esc(c.source)}">${esc(c.source)}</div>${resHTML(c.url)}</div>`; }).join('')}</div>` : ''}
-    ${p.lyrics ? `<div class="sec-title">${icon('lyrics')}<span class="grow">${esc(t('lyricsSec'))} ${p.lyrics.synced ? `<span class="tag ok">${icon('clock')}${esc(t('synced'))}</span>` : `<span class="tag">${esc(t('plain'))}</span>`}</span>
-        ${p.lyrics.instrumental ? '' : `<span class="t-body-s muted">${esc(p.lyricsEnabled ? (x.lyrics ? t('willReplace') : t('willAdd')) : t('willSkip'))}</span><button class="switch ${p.lyricsEnabled ? 'on' : ''}" id="rv-lyr-on"></button>`}</div>
-      ${p.lyrics.instrumental ? `<p class="muted">${esc(t('instrumental'))}</p>` : `<div class="lyr-prev">${esc(p.lyrics.synced || p.lyrics.plain || '')}</div>`}` : ''}
+    <div class="sec-title">${icon('lyrics')}<span class="grow">${esc(t('lyricsSec'))} ${lyrText ? (isSyncedText(lyrText) ? `<span class="tag ok">${icon('clock')}${esc(t('synced'))}</span>` : `<span class="tag">${esc(t('plain'))}</span>`) : `<span class="tag bad">${esc(t('noLyricsTag'))}</span>`}
+        <span class="t-body-s muted">${esc(lyrProposed ? (p.lyrics.source === 'manual' ? t('srcManual') : p.lyrics.source) : x.lyrics ? t('currentLyrics') : '')}</span></span>
+        <span class="t-body-s muted" id="rv-lyr-state">${esc(p.lyricsEnabled ? (x.lyrics ? t('willReplace') : t('willAdd')) : lyrProposed ? t('willSkip') : t('willKeep'))}</span>
+        <button class="switch ${p.lyricsEnabled ? 'on' : ''}" id="rv-lyr-on" ${lyrProposed ? '' : 'disabled'}></button>
+        <button class="ibtn" id="rv-lyr-search" title="${esc(t('lyricsSearch'))}">${icon('search', 'sm')}</button></div>
+      ${p.lyrics?.instrumental ? `<p class="muted">${esc(t('instrumental'))}</p>` : ''}
+      <textarea class="ta lyr-edit" id="rv-lyr" spellcheck="false" placeholder="${esc(t('lyricsPh'))}">${esc(lyrText)}</textarea>
     ${(p.notes || []).filter((n) => n !== 'instrumental').length ? `<div class="sec-title">${icon('info')}${esc(t('notes'))}</div><div class="t-body-s muted selectable">${p.notes.filter((n) => n !== 'instrumental').map(esc).join('<br>')}</div>` : ''}
     </div>
     <div class="rv-actions">
@@ -1080,25 +1115,75 @@ function renderReviewPane(list) {
   $('.rv-body', pane).scrollTop = scroll;
   const save = debounce(() => invoke('update_proposal', { proposal: p }), 200);
   const rerender = () => { save(); renderReviewPane(list); renderReviewList(list, pendingProposals()); };
-  $$('[data-chcb]', pane).forEach((el) => { el.onclick = () => { const c = p.changes[+el.dataset.chcb]; c.enabled = !c.enabled; rerender(); }; });
+  const liveCounts = () => {
+    const n = p.changes.filter((c) => c.enabled).length;
+    if ($('#rv-non', pane)) $('#rv-non', pane).textContent = `${n}/${p.changes.length}`;
+    const acc = $('[data-act="rv-accept"]', pane);
+    if (acc) acc.disabled = !(p.changes.length || p.covers.length || p.lyrics);
+  };
+  $$('[data-chcb]', pane).forEach((el) => { el.onclick = () => { const c = p.changes.find((y) => y.field === el.dataset.chcb); if (!c) return; c.enabled = !c.enabled; rerender(); }; });
   $$('[data-edit]', pane).forEach((el) => {
-    el.addEventListener('input', () => { const c = p.changes[+el.dataset.edit]; c.new = el.textContent.trim() || null; c.enabled = true; el.closest('tr').classList.remove('off'); $('.cb', el.closest('tr')).classList.add('on'); save(); });
+    el.addEventListener('input', () => {
+      const f = el.dataset.edit;
+      const val = el.textContent.trim() || null;
+      const cur = curTag(x, f);
+      const tr = el.closest('tr');
+      let c = p.changes.find((y) => y.field === f);
+      // Ręczna zmiana pola, którego wyszukiwanie nie ruszało – dopisywana do propozycji.
+      if (!c && val !== cur) { c = { field: f, old: cur, new: val, enabled: true, manual: true }; p.changes.push(c); tr.classList.remove('same'); $('.old', tr).textContent = cur ?? t('emptyVal'); }
+      else if (c?.manual && val === cur) { p.changes.splice(p.changes.indexOf(c), 1); c = null; tr.classList.add('same'); $('.old', tr).textContent = t('unchanged'); }
+      else if (c) { c.new = val; c.enabled = true; }
+      tr.classList.remove('off');
+      $('.cb', tr).classList.toggle('on', !!c);
+      liveCounts();
+      save();
+    });
     el.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); el.blur(); } });
   });
+  $('#rv-hide-same', pane).onclick = () => { S.rv.hideSame = !S.rv.hideSame; store('rvHideSame', S.rv.hideSame ? '1' : ''); renderReviewPane(list); };
+  const lyr = $('#rv-lyr', pane);
+  const setLyrics = (text) => {
+    text = (text || '').trim();
+    const sw = $('#rv-lyr-on', pane);
+    if (!text || text === (x.lyrics || '').trim()) {
+      if (p.lyrics?.source === 'manual') { p.lyrics = null; }
+      p.lyricsEnabled = false;
+    } else {
+      const sync = isSyncedText(text);
+      p.lyrics = { synced: sync ? text : null, plain: sync ? null : text, source: 'manual', instrumental: false };
+      p.lyricsEnabled = true;
+    }
+    sw.disabled = !p.lyrics || p.lyrics.instrumental;
+    sw.classList.toggle('on', p.lyricsEnabled);
+    $('#rv-lyr-state', pane).textContent = p.lyricsEnabled ? (x.lyrics ? t('willReplace') : t('willAdd')) : p.lyrics ? t('willSkip') : t('willKeep');
+    liveCounts();
+    save();
+  };
+  lyr.addEventListener('input', () => setLyrics(lyr.value));
+  lyr.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') { e.preventDefault(); lyr.blur(); } });
+  $('#rv-lyr-search', pane).onclick = () => lyricsSearch(x, (txt) => { lyr.value = txt; setLyrics(txt); renderReviewPane(list); });
   if ($('#rv-all-fields', pane)) $('#rv-all-fields', pane).onclick = () => { const on = nOn !== p.changes.length; p.changes.forEach((c) => (c.enabled = on)); rerender(); };
   if ($('#rv-cover-on', pane)) $('#rv-cover-on', pane).onclick = () => { p.coverEnabled = !p.coverEnabled; if (p.coverChoice == null) p.coverChoice = 0; rerender(); };
-  if ($('#rv-lyr-on', pane)) $('#rv-lyr-on', pane).onclick = () => { p.lyricsEnabled = !p.lyricsEnabled; rerender(); };
+  $('#rv-lyr-on', pane).onclick = () => { if (!p.lyrics || p.lyrics.instrumental) return; p.lyricsEnabled = !p.lyricsEnabled; rerender(); };
   $$('[data-cpick]', pane).forEach((el) => {
     el.onclick = () => { const i = +el.dataset.cpick; if (p.coverEnabled && p.coverChoice === i) p.coverEnabled = false; else { p.coverChoice = i; p.coverEnabled = true; } rerender(); };
   });
-  if ($('#rv-alts', pane)) $('#rv-alts', pane).onclick = (e) => menu(e.currentTarget, alt.map((a, i) => ({
-    icon: p.chosen === i ? 'check' : 'disc',
-    label: `${a.fields.title || ''} — ${[a.fields.album, a.fields.year, a.secondaryTypes?.join('/')].filter(Boolean).join(' · ')}`,
-    end: `${a.source} · ${Math.round(a.score * 100)}%`,
-    run: async () => {
-      try { const np = await invoke('choose_alternative', { id: x.id, index: i }); applySkipFields(np); S.proposals.set(x.id, np); refreshReview(); } catch (err) { snack(errMsg(err), 'bad'); }
-    },
-  })));
+  // Wynik łączony (wszystkie źródła) jest podstawowy; pojedyncze dopasowania to alternatywy.
+  const orig = S.rvOrig.get(x.id);
+  if ($('#rv-alts', pane)) $('#rv-alts', pane).onclick = (e) => menu(e.currentTarget, [
+    { icon: p.method !== 'manual' ? 'check' : 'layers', label: t('combinedResult'), end: orig ? `${Math.round(orig.confidence * 100)}%` : t('current'),
+      run: () => { if (!orig) return; const np = structuredClone(orig); S.proposals.set(x.id, np); invoke('update_proposal', { proposal: np }); refreshReview(); } },
+    'sep',
+    ...alt.map((a, i) => ({
+      icon: p.method === 'manual' && p.chosen === i ? 'check' : 'disc',
+      label: `${a.fields.title || ''} — ${[a.fields.album, a.fields.year, a.secondaryTypes?.join('/')].filter(Boolean).join(' · ')}`,
+      end: `${a.source} · ${Math.round(a.score * 100)}%`,
+      run: async () => {
+        if (!S.rvOrig.has(x.id) && p.method !== 'manual') S.rvOrig.set(x.id, structuredClone(p));
+        try { const np = await invoke('choose_alternative', { id: x.id, index: i }); applySkipFields(np); S.proposals.set(x.id, np); refreshReview(); } catch (err) { snack(errMsg(err), 'bad'); }
+      },
+    })),
+  ]);
 }
 function reviewStep(dir) {
   const list = reviewList();

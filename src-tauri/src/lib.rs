@@ -519,7 +519,7 @@ async fn analyze_one(app: &AppHandle, state: &Arc<AppState>, id: &str, manual: O
     let res = engine::analyze(&t, &settings, manual.clone()).await;
     match res.proposal {
         Some(p) => {
-            let auto = manual.is_none() && settings.auto_apply && p.confidence >= settings.auto_apply_threshold;
+            let auto = manual.is_none() && p.method != engine::OWN_TAGS && settings.auto_apply && p.confidence >= settings.auto_apply_threshold;
             if auto && has_work(&p) {
                 match ops::apply_proposal(&t, &p, &settings, &state.history, "auto").await {
                     Ok(nt) => {
