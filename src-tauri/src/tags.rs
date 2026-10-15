@@ -428,6 +428,7 @@ fn apply_field(tag: &mut Tag, name: &str, value: Option<String>) {
 pub fn write(path: &Path, req: &WriteRequest) -> Result<(), String> {
     let mut file = lofty::read_from_path(path).map_err(|e| format!("Nie można otworzyć pliku: {e}"))?;
     let tag_type = file.primary_tag_type();
+    let file_type = file.file_type();
     if file.primary_tag().is_none() {
         // Przenieś dane z innych tagów (np. ID3v1), żeby nic nie zginęło.
         let mut tag = Tag::new(tag_type);
@@ -499,7 +500,25 @@ pub fn write(path: &Path, req: &WriteRequest) -> Result<(), String> {
     } else {
         file.save_to_path(path, opts).map_err(|e| format!("Zapis nie powiódł się: {e}"))?;
     }
+    if file_type == FileType::Wav {
+        sync_riff_info(path, opts)?;
+    }
     Ok(())
+}
+
+/// WAV: dane trzymamy w ID3v2 (pełne tagi, okładka, tekst), ale Eksplorator Windows i część
+/// odtwarzaczy czyta tylko blok RIFF INFO – uzupełniamy go tymi samymi podstawowymi polami,
+/// żeby stare wartości nie „wracały”.
+fn sync_riff_info(path: &Path, opts: WriteOptions) -> Result<(), String> {
+    const RIFF_FIELDS: &[&str] = &["title", "artist", "album", "year", "track", "genre", "composer", "comment"];
+    let file = lofty::read_from_path(path).map_err(|e| format!("WAV: {e}"))?;
+    // Brak ID3 po zapisie = wszystkie pola wyczyszczone (np. cofnięcie zmian).
+    let f = file.tag(TagType::Id3v2).map(read_fields).unwrap_or_default();
+    let mut info = file.tag(TagType::RiffInfo).cloned().unwrap_or_else(|| Tag::new(TagType::RiffInfo));
+    for name in RIFF_FIELDS {
+        apply_field(&mut info, name, f.get(name));
+    }
+    info.save_to_path(path, opts).map_err(|e| format!("WAV (RIFF INFO): {e}"))
 }
 
 /// Migawka stanu pliku przed zmianą (do cofania).
@@ -515,8 +534,15 @@ pub struct Snapshot {
 pub fn snapshot(path: &Path) -> Option<Snapshot> {
     let file = lofty::read_from_path(path).ok()?;
     let tag = file.primary_tag();
+    // Pola także z pozostałych tagów (np. RIFF INFO w WAV, ID3v1) – inaczej cofnięcie by je wymazało.
+    let mut fields = tag.map(read_fields).unwrap_or_default();
+    for other in file.tags() {
+        if Some(other.tag_type()) != tag.map(|t| t.tag_type()) {
+            merge_missing(&mut fields, &read_fields(other));
+        }
+    }
     Some(Snapshot {
-        fields: tag.map(read_fields).unwrap_or_default(),
+        fields,
         cover_b64: tag
             .and_then(best_picture)
             .map(|p| base64::engine::general_purpose::STANDARD.encode(p.data())),

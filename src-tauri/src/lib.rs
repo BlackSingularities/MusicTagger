@@ -528,6 +528,21 @@ fn job_guard(state: &AppState) -> Result<(), String> {
     Ok(())
 }
 
+/// Uruchamia operację z limitem czasu i ochroną przed paniką – błąd jednego dostawcy danych
+/// albo nietypowego pliku kończy się komunikatem przy tym utworze, a kolejka idzie dalej.
+async fn guarded<T>(secs: u64, what: &str, fut: impl std::future::Future<Output = Result<T, String>>) -> Result<T, String> {
+    use futures::FutureExt;
+    match tokio::time::timeout(std::time::Duration::from_secs(secs), std::panic::AssertUnwindSafe(fut).catch_unwind()).await {
+        Ok(Ok(r)) => r,
+        Ok(Err(p)) => {
+            let msg = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
+            log::error!("{what}: panika – {msg}");
+            Err(format!("{what}: błąd wewnętrzny ({msg})"))
+        }
+        Err(_) => Err(format!("{what}: przekroczono czas ({secs} s) – serwis nie odpowiada")),
+    }
+}
+
 fn has_work(p: &Proposal) -> bool {
     p.changes.iter().any(|c| c.enabled) || p.cover_enabled || p.lyrics_enabled
 }
@@ -536,7 +551,17 @@ async fn analyze_one(app: &AppHandle, state: &Arc<AppState>, id: &str, manual: O
     let settings = state.settings();
     let Some(t) = state.set_status(id, TrackStatus::Working) else { return Ok(()) };
     emit_track(app, &t, None);
-    let res = engine::analyze(&t, &settings, manual.clone()).await;
+    let res = match guarded(240, "Analiza", async { Ok(engine::analyze(&t, &settings, manual.clone()).await) }).await {
+        Ok(r) => r,
+        Err(e) => {
+            let mut nt = t.clone();
+            nt.status = TrackStatus::Error;
+            nt.error = Some(e.clone());
+            state.put(nt.clone());
+            emit_track(app, &nt, None);
+            return Err(e);
+        }
+    };
     match res.proposal {
         Some(p) => {
             let auto = manual.is_none() && p.method != engine::OWN_TAGS && settings.auto_apply && p.confidence >= settings.auto_apply_threshold;
@@ -742,7 +767,7 @@ async fn apply_worker(app: AppHandle, state: Arc<AppState>) {
                 if let Some(w) = state.set_status(&id, TrackStatus::Working) {
                     emit_track(&app, &w, None);
                 }
-                match ops::apply_proposal(&t, &p, &settings, &state.history, &batch).await {
+                match guarded(600, "Zapis", ops::apply_proposal(&t, &p, &settings, &state.history, &batch)).await {
                     Ok(nt) => {
                         state.proposals.lock().unwrap().remove(&id);
                         state.put(nt.clone());

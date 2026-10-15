@@ -215,6 +215,7 @@ pub async fn find(q: &LyricsQuery<'_>, settings: &Settings, synced_only: bool) -
     let mut errs = vec![];
     // 1) Teksty z czasami – oba źródła równolegle.
     let (mut e1, mut e2) = (vec![], vec![]);
+    let (mut errs_t, mut errs_t2) = (vec![], vec![]);
     let lr = async {
         if settings.use_lrclib {
             from_lrclib(q, &mut e1).await
@@ -229,7 +230,9 @@ pub async fn find(q: &LyricsQuery<'_>, settings: &Settings, synced_only: bool) -
             None
         }
     };
-    let (lr, ne) = futures::join!(lr, ne);
+    let (lr, ne) = futures::join!(capped(lr, "LRCLIB", &mut errs_t), capped(ne, "NetEase", &mut errs_t2));
+    errs.extend(errs_t);
+    errs.extend(errs_t2);
     errs.extend(e1);
     errs.extend(e2);
     if let Some(r) = lr.as_ref().filter(|r| r.synced.is_some() || r.instrumental) {
@@ -271,7 +274,11 @@ pub async fn find(q: &LyricsQuery<'_>, settings: &Settings, synced_only: bool) -
             None
         }
     };
-    let (tk, gn, ov) = futures::join!(tk, gn, ov);
+    let (mut t3, mut t4, mut t5) = (vec![], vec![], vec![]);
+    let (tk, gn, ov) = futures::join!(capped(tk, "Tekstowo.pl", &mut t3), capped(gn, "Genius", &mut t4), capped(ov, "lyrics.ovh", &mut t5));
+    errs.extend(t3);
+    errs.extend(t4);
+    errs.extend(t5);
     errs.extend(e3);
     errs.extend(e4);
     errs.extend(e5);
@@ -288,6 +295,17 @@ pub async fn find(q: &LyricsQuery<'_>, settings: &Settings, synced_only: bool) -
         }
     }
     (None, errs)
+}
+
+/// Źródło tekstu z limitem czasu – zawieszony serwis nie wstrzymuje pozostałych.
+async fn capped<T>(fut: impl std::future::Future<Output = Option<T>>, name: &str, errs: &mut Vec<String>) -> Option<T> {
+    match tokio::time::timeout(std::time::Duration::from_secs(45), fut).await {
+        Ok(r) => r,
+        Err(_) => {
+            errs.push(format!("{name}: serwis nie odpowiada"));
+            None
+        }
+    }
 }
 
 /// Ręczne wyszukiwanie – lista wyników ze wszystkich źródeł.

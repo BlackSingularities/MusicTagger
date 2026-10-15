@@ -173,6 +173,13 @@ fn net_warn(warnings: &mut Vec<String>, e: &HttpError) {
     }
 }
 
+/// Zapytanie do jednego źródła z limitem czasu – zawieszony serwis nie blokuje analizy.
+async fn within<T>(fut: impl std::future::Future<Output = Result<T, HttpError>>) -> Result<T, HttpError> {
+    tokio::time::timeout(std::time::Duration::from_secs(75), fut)
+        .await
+        .unwrap_or_else(|_| Err(HttpError::Other("serwis nie odpowiada (przekroczono czas)".into())))
+}
+
 fn all_offline(w: &[String]) -> bool {
     !w.is_empty() && w.iter().all(|x| x.starts_with("brak połączenia"))
 }
@@ -239,7 +246,7 @@ pub async fn analyze(track: &Track, settings: &Settings, manual: Option<(String,
                 let term = format!("{} {}", search_artist.clone().unwrap_or_default(), clean_title);
                 itunes::search(term.trim(), &settings.itunes_country).await
             };
-            let (mb, dz, it) = futures::join!(mb, dz, it);
+            let (mb, dz, it) = futures::join!(within(mb), within(dz), within(it));
             match mb {
                 Ok(recs) => {
                     for (rec, s) in recs {
@@ -281,8 +288,8 @@ pub async fn analyze(track: &Track, settings: &Settings, manual: Option<(String,
     let need_fp = !is_manual && (best_text < 0.78 || q.title.is_none() || q.artist.is_none());
     if need_fp && settings.use_acoustid && !settings.acoustid_key.trim().is_empty() && settings.use_musicbrainz {
         let path = std::path::PathBuf::from(&track.path);
-        let fp = tokio::task::spawn_blocking(move || crate::fingerprint::compute(&path)).await;
-        match fp {
+        let fp = tokio::time::timeout(std::time::Duration::from_secs(90), tokio::task::spawn_blocking(move || crate::fingerprint::compute(&path))).await;
+        match fp.unwrap_or_else(|_| Ok(Err("przekroczono czas".into()))) {
             Ok(Ok((fp, dur))) => match acoustid::lookup(settings.acoustid_key.trim(), &fp, dur).await {
                 Ok(matches) => {
                     let mut taken = 0;

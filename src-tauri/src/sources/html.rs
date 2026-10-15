@@ -27,16 +27,17 @@ pub fn divs_with(html: &str, marker: &str) -> Vec<String> {
 }
 
 /// Pozycja `</div>` zamykającego element, którego treść zaczyna się w `start`.
+/// Działa na bajtach – wycinki `&str` w środku znaku wielobajtowego (np. „ą”) kończyły się paniką.
 fn matching_close(html: &str, start: usize) -> Option<usize> {
-    let lower = html.as_bytes();
+    let b = html.as_bytes();
     let mut depth = 1usize;
     let mut i = start;
-    while i < html.len() {
-        if lower[i] == b'<' {
-            let rest = &html[i..];
-            if rest.len() >= 4 && rest[..4].eq_ignore_ascii_case("<div") && rest[4..].starts_with(|c: char| c == ' ' || c == '>' || c == '\n') {
+    while i < b.len() {
+        if b[i] == b'<' {
+            let rest = &b[i..];
+            if rest.len() >= 5 && rest[..4].eq_ignore_ascii_case(b"<div") && matches!(rest[4], b' ' | b'>' | b'\n' | b'\t' | b'\r') {
                 depth += 1;
-            } else if rest.len() >= 6 && rest[..6].eq_ignore_ascii_case("</div>") {
+            } else if rest.len() >= 6 && rest[..6].eq_ignore_ascii_case(b"</div>") {
                 depth -= 1;
                 if depth == 0 {
                     return Some(i);
@@ -127,5 +128,13 @@ mod tests {
         let first = to_text(&remove_divs_with(&parts[0], "data-exclude-from-selection"));
         assert_eq!(first, "Raz\nDwa & trzy\nCztery\nPięć");
         assert_eq!(to_text(&parts[1]), "Sześć");
+    }
+
+    #[test]
+    fn multibyte_text_does_not_panic() {
+        let h = "<div data-x=\"1\"><ąą<ść</div>żółć<div data-x=\"1\">źdźbło<ę";
+        let parts = divs_with(h, "data-x=\"1\"");
+        assert_eq!(parts[0], "<ąą<ść");
+        assert_eq!(remove_divs_with(h, "data-x"), "żółć<div data-x=\"1\">źdźbło<ę");
     }
 }
