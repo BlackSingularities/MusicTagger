@@ -11,7 +11,7 @@ Aplikacja na **Windows** i **Androida** (Rust + Tauri 2), która skanuje folder 
 1. **Istniejące tagi**: jeśli są sensowne, służą do wyszukiwania. Tytuły w stylu „Track 07” czy wykonawca „Unknown Artist” są pomijane.
 2. **Nazwa pliku i folderów**: rozpoznaje m.in. `01 - Tytuł`, `Wykonawca - Tytuł`, `Wykonawca/Album (1999)/CD2/03. Tytuł` i pliki z YouTube (`(Official Video) [4K]`, identyfikatory filmów, `feat.`).
 3. **Odcisk dźwięku (AcoustID / Chromaprint)**: rozpoznaje utwór po samym dźwięku, gdy nie ma ani tagów, ani sensownej nazwy. Wymaga darmowego klucza z <https://acoustid.org/new-application>, który wpisuje się w Ustawieniach.
-4. **Kilka źródeł naraz**: MusicBrainz + Cover Art Archive, Deezer, iTunes i LRCLIB. Wyniki są oceniane według podobieństwa tytułu i wykonawcy, czasu trwania oraz wersji utworu (live, remix, acoustic…).
+4. **Kilka źródeł naraz i ich łączenie**: MusicBrainz + Cover Art Archive, Deezer i iTunes. Czego brakuje w wybranym źródle (okładka, gatunek, rok, numer utworu, ISRC), aplikacja uzupełnia z pozostałych – w razie potrzeby dopytuje Deezer/iTunes o konkretny album. Wyniki są oceniane według podobieństwa tytułu i wykonawcy, czasu trwania oraz wersji utworu (live, remix, acoustic…).
 5. **Wybór właściwego wydania**: aplikacja preferuje oficjalny album studyjny i rok pierwszego wydania zamiast składanek, koncertówek, bootlegów i edycji „Deluxe”. Album podany w tagach ma pierwszeństwo.
 6. **Pisownia z polskimi znakami**: gdy jedno ze źródeł ma pisownię z diakrytykami (np. „Podsiadło” zamiast „Podsiadlo”), aplikacja wybiera tę wersję.
 
@@ -38,6 +38,9 @@ Interfejs w stylu **Material Design 3** z czterema widokami: **Biblioteka**, **W
   - „Akceptuj pewne” zbiorczo i lista pól, których nigdy nie zmieniać (np. gatunek).
 - **Zapis w tle:** zaakceptowane zmiany trafiają do kolejki, która zapisuje kilka plików równolegle. Można w tym czasie dalej weryfikować.
 - **Edycja utworu:** panel z kartami Tagi / Okładka / Tekst / Plik. „Zapisz i dalej” (Enter) przechodzi od razu do kolejnego utworu.
+- **Teksty z wielu źródeł:** najpierw z czasami (LRCLIB, NetEase), potem zwykłe (Tekstowo.pl, Genius, lyrics.ovh). Każdy wynik jest sprawdzany: tytuł, wykonawca i zgodność czasów z długością utworu. Ręczne wyszukiwanie przeszukuje wszystkie źródła naraz.
+- **Pliki .lrc:** wykryte pliki `.lrc` można jednym kliknięciem przenieść do środka plików muzycznych (także w analizie). Plik `.lrc` po przeniesieniu jest ukrywany, usuwany albo zostawiany. Jeśli aplikacja ma tworzyć `.lrc`, są one ukryte (Windows).
+- **Szybkość:** pamięć podręczna tagów (ponowne wczytanie folderu jest prawie natychmiastowe), zapis wielu plików naraz bez czekania na najwolniejszy, jednokrotne pobieranie okładki dla całego albumu. Maksymalna równoległość jest domyślna.
 - **Teksty z czasami w środku pliku:** MP3 (USLT + natywna ramka SYLT), FLAC/OGG/OPUS (LYRICS), M4A (©lyr). Pliki `.lrc` są opcjonalne.
 - Podgląd karaoke z odtwarzaczem, korekta przesunięcia i ręczna synchronizacja.
 - Zmiana nazw plików według wzorca, edycja zbiorcza, numeracja, okładka dla wielu plików.

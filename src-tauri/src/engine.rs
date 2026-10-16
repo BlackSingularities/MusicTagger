@@ -4,7 +4,7 @@
 use crate::hints::{self, Hint};
 use crate::models::*;
 use crate::settings::Settings;
-use crate::sources::{acoustid, deezer, http::HttpError, itunes, lrclib, musicbrainz};
+use crate::sources::{acoustid, deezer, http::HttpError, itunes, lyrics, musicbrainz};
 use std::path::Path;
 
 #[derive(Debug, Clone, Default)]
@@ -173,6 +173,13 @@ fn net_warn(warnings: &mut Vec<String>, e: &HttpError) {
     }
 }
 
+/// Zapytanie do jednego źródła z limitem czasu – zawieszony serwis nie blokuje analizy.
+async fn within<T>(fut: impl std::future::Future<Output = Result<T, HttpError>>) -> Result<T, HttpError> {
+    tokio::time::timeout(std::time::Duration::from_secs(75), fut)
+        .await
+        .unwrap_or_else(|_| Err(HttpError::Other("serwis nie odpowiada (przekroczono czas)".into())))
+}
+
 fn all_offline(w: &[String]) -> bool {
     !w.is_empty() && w.iter().all(|x| x.starts_with("brak połączenia"))
 }
@@ -239,7 +246,7 @@ pub async fn analyze(track: &Track, settings: &Settings, manual: Option<(String,
                 let term = format!("{} {}", search_artist.clone().unwrap_or_default(), clean_title);
                 itunes::search(term.trim(), &settings.itunes_country).await
             };
-            let (mb, dz, it) = futures::join!(mb, dz, it);
+            let (mb, dz, it) = futures::join!(within(mb), within(dz), within(it));
             match mb {
                 Ok(recs) => {
                     for (rec, s) in recs {
@@ -281,8 +288,8 @@ pub async fn analyze(track: &Track, settings: &Settings, manual: Option<(String,
     let need_fp = !is_manual && (best_text < 0.78 || q.title.is_none() || q.artist.is_none());
     if need_fp && settings.use_acoustid && !settings.acoustid_key.trim().is_empty() && settings.use_musicbrainz {
         let path = std::path::PathBuf::from(&track.path);
-        let fp = tokio::task::spawn_blocking(move || crate::fingerprint::compute(&path)).await;
-        match fp {
+        let fp = tokio::time::timeout(std::time::Duration::from_secs(90), tokio::task::spawn_blocking(move || crate::fingerprint::compute(&path))).await;
+        match fp.unwrap_or_else(|_| Ok(Err("przekroczono czas".into()))) {
             Ok(Ok((fp, dur))) => match acoustid::lookup(settings.acoustid_key.trim(), &fp, dur).await {
                 Ok(matches) => {
                     let mut taken = 0;
@@ -317,15 +324,14 @@ pub async fn analyze(track: &Track, settings: &Settings, manual: Option<(String,
         }
     }
 
-    if scored.is_empty() {
-        return Analysis { offline: all_offline(&warnings), proposal: None, warnings };
-    }
-
     // 4) Wybór najlepszego nagrania, potem najlepszego wydania w jego obrębie.
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    let best_score = scored[0].0;
+    let best_score = scored.first().map(|x| x.0).unwrap_or(0.0);
     if best_score < 0.55 {
-        return Analysis { offline: all_offline(&warnings), proposal: None, warnings };
+        // Brak pewnego dopasowania – i tak uzupełniamy tekst/okładkę na podstawie obecnych tagów.
+        let offline = all_offline(&warnings);
+        let proposal = if offline { None } else { from_own_tags(track, &q, settings, &warnings).await };
+        return Analysis { offline, proposal, warnings };
     }
     let best_title = hints::normalize_title(scored[0].1.fields.title.as_deref().unwrap_or(""));
     let best_artist = scored[0].1.fields.artist.clone().unwrap_or_default();
@@ -394,10 +400,48 @@ pub async fn analyze(track: &Track, settings: &Settings, manual: Option<(String,
         alternatives,
         chosen: 0,
         notes: warnings.clone(),
+        sources: vec![],
     };
     let supporting: Vec<Candidate> = scored.iter().filter(|(_, c)| same(c)).map(|(_, c)| c.clone()).collect();
     finalize(track, &mut proposal, chosen, &supporting, settings, &q).await;
     Analysis { proposal: Some(proposal), warnings, offline: false }
+}
+
+/// Źródło „kandydata” zbudowanego z obecnych tagów i nazwy pliku.
+pub const OWN_TAGS: &str = "tags";
+
+/// Propozycja bez dopasowania w bazach: obecne tagi (luki z nazwy pliku) + tekst i okładka z sieci.
+async fn from_own_tags(track: &Track, q: &Query, settings: &Settings, warnings: &[String]) -> Option<Proposal> {
+    let (title, artist) = (q.title.clone()?, q.artist.clone()?);
+    let mut fields = track.tags.clone();
+    if fields.title.as_deref().map(hints::is_garbage_title).unwrap_or(true) {
+        fields.title = Some(title);
+    }
+    if fields.artist.as_deref().map(hints::is_garbage_artist).unwrap_or(true) {
+        fields.artist = Some(artist);
+    }
+    fields.album = fields.album.or(q.album.clone());
+    fields.year = fields.year.or(q.year.clone());
+    fields.track = fields.track.or(q.track);
+    let chosen = Candidate { source: OWN_TAGS.into(), fields, duration: Some(track.duration), ..Default::default() };
+    let mut proposal = Proposal {
+        track_id: track.id.clone(),
+        confidence: 0.5,
+        method: OWN_TAGS.into(),
+        changes: vec![],
+        covers: vec![],
+        cover_choice: None,
+        cover_enabled: false,
+        lyrics: None,
+        lyrics_enabled: false,
+        alternatives: vec![],
+        chosen: 0,
+        notes: warnings.to_vec(),
+        sources: vec![],
+    };
+    finalize(track, &mut proposal, chosen, &[], settings, q).await;
+    let work = proposal.changes.iter().any(|c| c.enabled) || proposal.cover_enabled || proposal.lyrics_enabled;
+    work.then_some(proposal)
 }
 
 /// Uzupełnia wybranego kandydata (szczegóły wydania, okładki, tekst) i liczy zmiany.
@@ -443,16 +487,38 @@ pub async fn finalize(
         fields = c.fields;
     }
 
+    // Łączenie źródeł: gdy żadne inne źródło nie opisuje tego utworu, dopytujemy Deezer wprost
+    // o wybrany tytuł i wykonawcę (szybki, bez limitów) – stamtąd okładka, gatunek, ISRC, BPM.
+    let mut supporting: Vec<Candidate> = supporting.to_vec();
+    if settings.mix_sources && settings.use_deezer && chosen.source != "Deezer" && !supporting.iter().any(|c| c.source == "Deezer") {
+        if let (Some(t), Some(a)) = (&fields.title, &fields.artist) {
+            let clean_title = hints::split_feat(t).0;
+            if let Ok(list) = deezer::search(Some(&hints::primary_artist(a)), &clean_title).await {
+                let probe = Query { title: Some(t.clone()), artist: Some(a.clone()), duration: chosen.duration.unwrap_or(q.duration), versions: q.versions.clone(), ..Default::default() };
+                supporting.extend(list.into_iter().map(|(c, _)| c).filter(|c| score_candidate(c, &probe) >= 0.75));
+            }
+        }
+    }
+
     // Uzupełnianie luk z innych źródeł opisujących ten sam utwór.
-    let album_norm = fields.album.as_deref().map(hints::normalize_title).unwrap_or_default();
+    let mut album_norm = fields.album.as_deref().map(hints::normalize_title).unwrap_or_default();
     let mut deezer_enriched = chosen.source == "Deezer";
+    let mut other_covers: Vec<CoverCandidate> = vec![];
+    // Najpierw kandydaci z tego samego albumu – ich dane są najbardziej wiarygodne.
+    let album_of = |c: &Candidate, norm: &str| {
+        c.fields.album.as_deref().map(|a| hints::sim_norm(&hints::normalize_title(a), norm) > 0.85).unwrap_or(false)
+    };
+    supporting.sort_by_key(|c| !album_of(c, &album_norm));
+    let mut sources = vec![chosen.source.clone()];
     for c in supporting.iter().filter(|c| c.source != chosen.source) {
-        let same_album = c
-            .fields
-            .album
-            .as_deref()
-            .map(|a| hints::sim_norm(&hints::normalize_title(a), &album_norm) > 0.85)
-            .unwrap_or(false);
+        let before = fields.clone();
+        if settings.mix_sources && fields.album.is_none() {
+            if let Some(a) = &c.fields.album {
+                fields.album = Some(a.clone());
+                album_norm = hints::normalize_title(a);
+            }
+        }
+        let same_album = album_of(c, &album_norm);
         let mut c = c.clone();
         if c.source == "Deezer" && !deezer_enriched && (fields.genre.is_none() || fields.isrc.is_none() || same_album) {
             deezer::enrich(&mut c).await;
@@ -475,6 +541,18 @@ pub async fn finalize(
                 fields.track = c.fields.track;
                 fields.track_total = fields.track_total.or(c.fields.track_total);
             }
+            if settings.mix_sources {
+                fields.year = fields.year.take().or(c.fields.year.clone());
+                fields.album_artist = fields.album_artist.take().or(c.fields.album_artist.clone());
+                fields.track_total = fields.track_total.or(c.fields.track_total);
+                if fields.disc.is_none() && c.fields.disc_total.unwrap_or(1) > 1 {
+                    fields.disc = c.fields.disc;
+                    fields.disc_total = c.fields.disc_total;
+                }
+            }
+        }
+        if settings.mix_sources {
+            fields.composer = fields.composer.take().or(c.fields.composer.clone());
         }
         // Pisownia z polskimi znakami (MB czasem ma wersję bez diakrytyków).
         for (mine, theirs) in [
@@ -487,14 +565,24 @@ pub async fn finalize(
                 }
             }
         }
-        if same_album {
-            if let Some(url) = &c.cover_url {
-                covers.push(CoverCandidate {
-                    url: url.clone(),
-                    thumb: c.cover_thumb.clone().unwrap_or(url.clone()),
-                    source: c.source.clone(),
-                    width: 1400,
-                    height: 1400,
+        if fields != before && !sources.contains(&c.source) {
+            sources.push(c.source.clone());
+        }
+        if let Some(url) = &c.cover_url {
+            let cc = CoverCandidate {
+                url: url.clone(),
+                thumb: c.cover_thumb.clone().unwrap_or(url.clone()),
+                source: c.source.clone(),
+                width: 1400,
+                height: 1400,
+            };
+            if same_album {
+                covers.push(cc);
+            } else {
+                // Okładka innego wydania (np. singla) – tylko w ostateczności.
+                other_covers.push(CoverCandidate {
+                    source: format!("{} · {}", c.source, c.fields.album.clone().unwrap_or_default()),
+                    ..cc
                 });
             }
         }
@@ -532,6 +620,17 @@ pub async fn finalize(
             },
         );
     }
+    // Łączenie źródeł: brak pewnej okładki (albo tylko niepewna z CAA) → szukamy albumu w Deezer/iTunes.
+    let has_store_cover = covers.iter().any(|c| c.source == "iTunes" || c.source == "Deezer");
+    if settings.mix_sources && !has_store_cover {
+        if let (Some(album), Some(artist)) = (fields.album.clone(), fields.album_artist.clone().or(fields.artist.clone())) {
+            let artist = hints::primary_artist(&artist);
+            covers.extend(album_cover_search(&artist, &album, settings, covers.is_empty()).await);
+        }
+    }
+    if settings.mix_sources && covers.is_empty() {
+        covers.extend(other_covers.into_iter().take(3));
+    }
     // Kolejność: iTunes/Deezer (stała jakość) przed skanami z CAA.
     covers.sort_by_key(|c| match c.source.as_str() {
         "iTunes" => 0,
@@ -553,6 +652,7 @@ pub async fn finalize(
     }
 
     proposal.changes = build_changes(&track.tags, &fields, settings);
+    proposal.sources = sources;
 
     let need_cover = match &track.cover {
         None => true,
@@ -562,26 +662,103 @@ pub async fn finalize(
     proposal.cover_choice = if covers.is_empty() { None } else { Some(0) };
     proposal.covers = covers;
 
-    // Tekst (najlepiej z czasami).
-    let need_lyrics = track.lyrics.is_none() || (settings.prefer_synced && !track.lyrics_synced);
-    if settings.fetch_lyrics && settings.use_lrclib && need_lyrics {
-        let artist = fields.artist.clone().or(track.tags.artist.clone()).or(q.artist.clone());
-        let title = fields.title.clone().or(track.tags.title.clone()).or(q.title.clone());
-        if let (Some(a), Some(t)) = (artist, title) {
-            match lrclib::find(&a, &t, fields.album.as_deref(), track.duration).await {
-                Ok(Some(l)) => {
-                    let useful = if track.lyrics.is_some() { l.synced.is_some() } else { l.plain.is_some() || l.synced.is_some() };
+    // Tekst (najlepiej z czasami). Plik .lrc obok utworu → przeniesienie do środka pliku.
+    let path = Path::new(&track.path);
+    let from_lrc = (settings.merge_lrc_files && track.lrc_file && !track.lyrics_in_tag)
+        .then(|| crate::tags::read_lrc(path))
+        .flatten()
+        .map(|text| {
+            let synced = crate::tags::is_synced_lyrics(&text);
+            LyricsResult {
+                synced: synced.then(|| text.clone()),
+                plain: (!synced).then_some(text),
+                source: crate::ops::LRC_SOURCE.into(),
+                instrumental: false,
+            }
+        });
+    let has_synced = track.lyrics_synced || from_lrc.as_ref().map(|l| l.synced.is_some()).unwrap_or(false);
+    let has_any = track.lyrics.is_some() || from_lrc.is_some();
+    let need_online = !has_any || (settings.prefer_synced && !has_synced);
+    if settings.fetch_lyrics && need_online {
+        // Kolejne warianty (wynik łączony, obecne tagi, nazwa pliku) – aż któryś da tekst.
+        let mut tries: Vec<(String, String)> = vec![];
+        for (a, t) in [
+            (fields.artist.clone(), fields.title.clone()),
+            (track.tags.artist.clone(), track.tags.title.clone()),
+            (q.artist.clone(), q.title.clone()),
+        ] {
+            if let (Some(a), Some(t)) = (a, t) {
+                let key = (hints::normalize(&a), hints::normalize(&t));
+                if !key.0.is_empty() && !key.1.is_empty() && !tries.iter().any(|(x, y)| (hints::normalize(x), hints::normalize(y)) == key) {
+                    tries.push((a, t));
+                }
+            }
+        }
+        let mut result = (None, vec![]);
+        for (a, t) in tries.iter().take(3) {
+            let lq = lyrics::LyricsQuery { artist: a, title: t, album: fields.album.as_deref(), duration: track.duration };
+            result = lyrics::find(&lq, settings, has_any).await;
+            if result.0.is_some() || all_offline(&result.1) {
+                break;
+            }
+        }
+        {
+            let (found, errs) = result;
+            match found {
+                Some(l) => {
+                    let useful = if has_any { l.synced.is_some() } else { l.plain.is_some() || l.synced.is_some() };
                     proposal.lyrics_enabled = useful && !l.instrumental;
                     if l.instrumental {
                         proposal.notes.push("instrumental".into());
                     }
-                    proposal.lyrics = Some(l);
+                    if useful || l.instrumental || from_lrc.is_none() {
+                        proposal.lyrics = Some(l);
+                    }
                 }
-                Ok(None) => {}
-                Err(e) => proposal.notes.push(e.to_string()),
+                None => proposal.notes.extend(errs),
             }
         }
     }
+    if !proposal.lyrics_enabled {
+        if let Some(l) = from_lrc {
+            proposal.lyrics = Some(l);
+            proposal.lyrics_enabled = true;
+        }
+    }
+}
+
+/// Szuka okładki albumu w Deezer (i w iTunes, gdy `with_itunes`) – dopasowanie po tytule albumu i wykonawcy.
+async fn album_cover_search(artist: &str, album: &str, settings: &Settings, with_itunes: bool) -> Vec<CoverCandidate> {
+    let term = format!("{artist} {}", hints::split_feat(album).0);
+    let dz = async {
+        if settings.use_deezer {
+            deezer::album_covers(&term).await.unwrap_or_default()
+        } else {
+            vec![]
+        }
+    };
+    let it = async {
+        if settings.use_itunes && with_itunes {
+            itunes::album_covers(&term, &settings.itunes_country).await.unwrap_or_default()
+        } else {
+            vec![]
+        }
+    };
+    let (dz, it) = futures::join!(dz, it);
+    let want = hints::normalize_title(album);
+    let mut out = vec![];
+    for (list, src) in [(dz, "Deezer"), (it, "iTunes")] {
+        let best = list
+            .into_iter()
+            .map(|(a, al, c)| (hints::sim_norm(&hints::normalize_title(&al), &want) * 0.6 + hints::artist_similarity(&a, artist) * 0.4, a, al, c))
+            .filter(|(s, a, al, _)| *s > 0.85 && hints::artist_similarity(a, artist) > 0.7 && hints::sim_norm(&hints::normalize_title(al), &want) > 0.85)
+            .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        if let Some((_, _, _, mut c)) = best {
+            c.source = src.into();
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Porównuje bieżące tagi z nowymi wartościami według trybu zapisu.

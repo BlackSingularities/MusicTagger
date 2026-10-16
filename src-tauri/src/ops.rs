@@ -5,7 +5,10 @@ use crate::models::*;
 use crate::settings::Settings;
 use crate::sources::http;
 use crate::tags::{self, WriteRequest};
+use once_cell::sync::Lazy;
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 /// Pobiera okładkę z listy kandydatów (z obsługą zapasowych adresów).
 pub async fn download_cover(p: &Proposal) -> Option<Vec<u8>> {
@@ -54,18 +57,59 @@ pub fn lrc_with_header(lrc: &str, f: &TagFields, duration: f64) -> String {
     format!("{h}{}", lrc.trim_start())
 }
 
-/// Zapisuje tekst: w tagu i/lub w pliku .lrc obok utworu.
+/// Zapisuje tekst: zawsze w środku pliku (chyba że wybrano wyłącznie .lrc), opcjonalnie w pliku .lrc.
 pub fn write_lyrics(path: &Path, req: &mut WriteRequest, l: &LyricsResult, settings: &Settings, f: &TagFields, duration: f64) -> Result<(), String> {
     let text = if settings.prefer_synced { l.synced.clone().or(l.plain.clone()) } else { l.plain.clone().or(l.synced.clone()) };
-    if settings.embed_lyrics {
+    let lrc_only = !settings.embed_lyrics && settings.write_lrc_file && l.synced.is_some();
+    if !lrc_only {
         req.lyrics = Some(text.clone());
     }
-    if settings.write_lrc_file {
+    // Tekst pochodzący z istniejącego .lrc nie jest zapisywany ponownie do .lrc.
+    if settings.write_lrc_file && l.source != LRC_SOURCE {
         if let Some(sync) = &l.synced {
-            std::fs::write(tags::lrc_path(path), lrc_with_header(sync, f, duration)).map_err(|e| format!(".lrc: {e}"))?;
+            tags::write_text_file(&tags::lrc_path(path), &lrc_with_header(sync, f, duration), settings.hide_lrc_files)
+                .map_err(|e| format!(".lrc: {e}"))?;
         }
     }
     Ok(())
+}
+
+/// Nazwa „źródła” tekstu wczytanego z pliku .lrc obok utworu.
+pub const LRC_SOURCE: &str = ".lrc";
+
+/// Co zrobić z plikiem .lrc po przeniesieniu tekstu do pliku muzycznego.
+pub fn after_lrc_merge(path: &Path, settings: &Settings) {
+    if !tags::lrc_path(path).exists() {
+        return;
+    }
+    let action = if settings.write_lrc_file && settings.lrc_after_merge == "delete" { "hide" } else { settings.lrc_after_merge.as_str() };
+    let res = match action {
+        "delete" => std::fs::remove_file(tags::lrc_path(path)),
+        "hide" => tags::hide_lrc(path),
+        _ => Ok(()),
+    };
+    if let Err(e) = res {
+        log::warn!("{}: .lrc – {e}", path.display());
+    }
+}
+
+/// Przenosi tekst z pliku .lrc do środka pliku muzycznego (z wpisem w historii).
+pub fn merge_lrc(track: &Track, settings: &Settings, history: &History, batch: &str) -> Result<Track, String> {
+    let path = PathBuf::from(&track.path);
+    let text = tags::read_lrc(&path).ok_or("Brak pliku .lrc")?;
+    let synced = tags::is_synced_lyrics(&text);
+    // Zwykły tekst w tagu nie jest zastępowany niezsynchronizowanym .lrc.
+    if track.lyrics_in_tag && !synced {
+        return Err("Plik .lrc nie zawiera czasów".into());
+    }
+    history.record(batch, &path, "tag", vec![if synced { "syncedLyrics" } else { "lyrics" }.into()]);
+    let req = WriteRequest { lyrics: Some(Some(text)), ..Default::default() };
+    tags::write(&path, &req)?;
+    after_lrc_merge(&path, settings);
+    let mut t = tags::read_track(&path);
+    tags::evaluate(&mut t, settings.min_cover_size);
+    t.status = TrackStatus::Applied;
+    Ok(t)
 }
 
 pub fn save_folder_cover(path: &Path, data: &[u8]) {
@@ -77,6 +121,38 @@ pub fn save_folder_cover(path: &Path, data: &[u8]) {
             let _ = std::fs::write(dir.join("cover.jpg"), data);
         }
     }
+}
+
+/// Uruchamia blokującą operację na pliku bez blokowania wątku asynchronicznego
+/// (w środowisku wielowątkowym; w testach – po prostu wykonuje).
+pub fn run_blocking<R>(f: impl FnOnce() -> R) -> R {
+    match tokio::runtime::Handle::try_current() {
+        Ok(h) if h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => tokio::task::block_in_place(f),
+        _ => f(),
+    }
+}
+
+/// Gotowe (pobrane i przeskalowane) okładki – utwory z jednego albumu nie pobierają jej ponownie.
+static COVER_CACHE: Lazy<Mutex<VecDeque<(String, Vec<u8>)>>> = Lazy::new(|| Mutex::new(VecDeque::new()));
+const COVER_CACHE_SIZE: usize = 24;
+
+async fn prepared_cover(p: &Proposal, settings: &Settings) -> Result<Vec<u8>, String> {
+    let url = p.cover_choice.and_then(|i| p.covers.get(i)).map(|c| c.url.clone()).unwrap_or_default();
+    let key = format!("{url}|{}|{}", settings.max_cover_size, settings.cover_quality);
+    if let Some((_, b)) = COVER_CACHE.lock().unwrap().iter().find(|(k, _)| *k == key) {
+        return Ok(b.clone());
+    }
+    let raw = download_cover(p).await.ok_or("Nie udało się pobrać okładki")?;
+    let (max, q) = (settings.max_cover_size, settings.cover_quality);
+    let jpg = tokio::task::spawn_blocking(move || tags::process_cover(&raw, max, q).map(|x| x.0))
+        .await
+        .map_err(|e| e.to_string())??;
+    let mut c = COVER_CACHE.lock().unwrap();
+    c.push_back((key, jpg.clone()));
+    while c.len() > COVER_CACHE_SIZE {
+        c.pop_front();
+    }
+    Ok(jpg)
 }
 
 /// Stosuje propozycję do pliku. Zwraca zaktualizowany utwór.
@@ -92,32 +168,34 @@ pub async fn apply_proposal(track: &Track, p: &Proposal, settings: &Settings, hi
     }
     let mut cover_bytes = None;
     if p.cover_enabled {
-        if let Some(raw) = download_cover(p).await {
-            let (jpg, _, _) = tags::process_cover(&raw, settings.max_cover_size, settings.cover_quality)?;
-            cover_bytes = Some(jpg.clone());
-            req.cover = Some(jpg);
-            summary.push("cover".into());
-        } else {
-            return Err("Nie udało się pobrać okładki".into());
-        }
+        let jpg = prepared_cover(p, settings).await?;
+        cover_bytes = Some(jpg.clone());
+        req.cover = Some(jpg);
+        summary.push("cover".into());
     }
-    history.record(batch, &path, "tag", summary.clone());
-    if p.lyrics_enabled {
-        if let Some(l) = &p.lyrics {
+    let lyrics = p.lyrics.as_ref().filter(|_| p.lyrics_enabled);
+    if let Some(l) = lyrics {
+        summary.push(if l.synced.is_some() { "syncedLyrics" } else { "lyrics" }.into());
+    }
+    run_blocking(|| -> Result<(), String> {
+        history.record(batch, &path, "tag", summary.clone());
+        if let Some(l) = lyrics {
             write_lyrics(&path, &mut req, l, settings, &merged, track.duration)?;
-            summary.push(if l.synced.is_some() { "syncedLyrics" } else { "lyrics" }.into());
         }
-    }
-    if !req.fields.is_empty() || req.cover.is_some() || req.lyrics.is_some() {
-        let path2 = path.clone();
-        tokio::task::spawn_blocking(move || tags::write(&path2, &req)).await.map_err(|e| e.to_string())??;
-    }
-    if settings.save_folder_jpg {
-        if let Some(b) = &cover_bytes {
-            save_folder_cover(&path, b);
+        if !req.fields.is_empty() || req.cover.is_some() || req.lyrics.is_some() {
+            tags::write(&path, &req)?;
         }
-    }
-    let mut t = tags::read_track(&path);
+        if lyrics.map(|l| l.source == LRC_SOURCE).unwrap_or(false) && req.lyrics.is_some() {
+            after_lrc_merge(&path, settings);
+        }
+        if settings.save_folder_jpg {
+            if let Some(b) = &cover_bytes {
+                save_folder_cover(&path, b);
+            }
+        }
+        Ok(())
+    })?;
+    let mut t = run_blocking(|| tags::read_track(&path));
     tags::evaluate(&mut t, settings.min_cover_size);
     t.status = TrackStatus::Applied;
     Ok(t)
@@ -174,6 +252,10 @@ pub fn rename_file(old: &Path, new_name: &str) -> Result<PathBuf, String> {
     let lrc_old = tags::lrc_path(old);
     if lrc_old.exists() {
         let _ = std::fs::rename(&lrc_old, tags::lrc_path(&new));
+    }
+    let bak = tags::lrc_backup_path(old);
+    if bak.exists() {
+        let _ = std::fs::rename(&bak, tags::lrc_backup_path(&new));
     }
     Ok(new)
 }

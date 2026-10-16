@@ -37,6 +37,10 @@ fn interval(service: &str) -> Duration {
         "itunes" => Duration::from_millis(3100),
         "deezer" => Duration::from_millis(120),
         "lrclib" => Duration::from_millis(100),
+        "netease" => Duration::from_millis(250),
+        "genius" => Duration::from_millis(400),
+        "tekstowo" => Duration::from_millis(500),
+        "lyricsovh" => Duration::from_millis(200),
         "caa" => Duration::from_millis(50),
         _ => Duration::from_millis(50),
     }
@@ -123,6 +127,30 @@ fn mark_offline(service: &'static str) {
 
 /// GET z limiterem, ponawianiem przy 503/błędach sieci i parsowaniem JSON.
 pub async fn get_json<T: DeserializeOwned>(service: &'static str, url: &str) -> Result<T, HttpError> {
+    get_json_h(service, url, &[]).await
+}
+
+/// Jak [`get_json`], z dodatkowymi nagłówkami (np. Referer).
+pub async fn get_json_h<T: DeserializeOwned>(service: &'static str, url: &str, headers: &[(&str, &str)]) -> Result<T, HttpError> {
+    let text = get_text_h(service, url, "application/json", headers).await?;
+    serde_json::from_str::<T>(&text).map_err(|e| HttpError::Other(format!("{service}: {e}")))
+}
+
+/// Pobiera stronę HTML jako tekst (dla serwisów bez API).
+pub async fn get_html(service: &'static str, url: &str) -> Result<String, HttpError> {
+    get_text_h(
+        service,
+        url,
+        "text/html,application/xhtml+xml",
+        &[("User-Agent", BROWSER_UA), ("Accept-Language", "pl,en;q=0.8")],
+    )
+    .await
+}
+
+/// Niektóre serwisy z tekstami odrzucają nietypowe nazwy klientów.
+pub const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+
+async fn get_text_h(service: &'static str, url: &str, accept: &str, headers: &[(&str, &str)]) -> Result<String, HttpError> {
     if offline_now(service) {
         return Err(HttpError::Network(service.to_string()));
     }
@@ -131,15 +159,19 @@ pub async fn get_json<T: DeserializeOwned>(service: &'static str, url: &str) -> 
         if !LIMITER.acquire(service).await {
             return Err(HttpError::RateLimited);
         }
-        match CLIENT.get(url).header("Accept", "application/json").send().await {
+        let mut req = CLIENT.get(url).header("Accept", accept);
+        for (k, v) in headers {
+            req = req.header(*k, *v);
+        }
+        match req.send().await {
             Ok(resp) => {
                 let status = resp.status();
                 if status.is_success() {
-                    return resp.json::<T>().await.map_err(|e| HttpError::Other(format!("{service}: {e}")));
+                    return resp.text().await.map_err(|e| HttpError::Other(format!("{service}: {e}")));
                 }
                 match status.as_u16() {
                     404 => return Err(HttpError::NotFound),
-                    403 | 429 if service == "itunes" => {
+                    403 | 429 if matches!(service, "itunes" | "genius" | "tekstowo" | "netease") => {
                         LIMITER.block(service, Duration::from_secs(90)).await;
                         return Err(HttpError::RateLimited);
                     }

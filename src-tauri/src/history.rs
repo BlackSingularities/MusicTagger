@@ -4,7 +4,9 @@
 use crate::tags::{self, Snapshot};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 const MAX_ENTRIES: usize = 5000;
 
@@ -25,6 +27,9 @@ pub struct Entry {
 pub struct History {
     dir: PathBuf,
     entries: Mutex<Vec<Entry>>,
+    /// Indeks zapisywany jest najwyżej raz na sekundę przy masowym zapisie (patrz `flush`).
+    last_persist: Mutex<Option<Instant>>,
+    dirty: AtomicBool,
 }
 
 impl History {
@@ -35,10 +40,31 @@ impl History {
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
-        Self { dir, entries: Mutex::new(entries) }
+        Self { dir, entries: Mutex::new(entries), last_persist: Mutex::new(None), dirty: AtomicBool::new(false) }
+    }
+
+    /// Zapisuje indeks, jeśli są niezapisane zmiany (wywoływane po zakończeniu partii).
+    pub fn flush(&self) {
+        if self.dirty.load(Ordering::SeqCst) {
+            let e = self.entries.lock().unwrap();
+            self.persist(&e);
+        }
+    }
+
+    /// Zapis indeksu z ograniczeniem częstotliwości – przy tysiącach wpisów pełny zapis
+    /// po każdym pliku spowalniał masowe zapisywanie.
+    fn persist_throttled(&self, entries: &[Entry]) {
+        let recent = self.last_persist.lock().unwrap().map(|t| t.elapsed() < Duration::from_secs(1)).unwrap_or(false);
+        if recent {
+            self.dirty.store(true, Ordering::SeqCst);
+        } else {
+            self.persist(entries);
+        }
     }
 
     fn persist(&self, entries: &[Entry]) {
+        self.dirty.store(false, Ordering::SeqCst);
+        *self.last_persist.lock().unwrap() = Some(Instant::now());
         if let Ok(s) = serde_json::to_string(entries) {
             let tmp = self.dir.join("index.json.tmp");
             if std::fs::write(&tmp, s).is_ok() {
@@ -72,7 +98,7 @@ impl History {
                 let _ = std::fs::remove_file(self.dir.join(format!("{}.json", d.id)));
             }
         }
-        self.persist(&e);
+        self.persist_throttled(&e);
         Some(id)
     }
 
@@ -134,6 +160,10 @@ impl History {
                         if lrc_new.exists() {
                             let _ = std::fs::rename(lrc_new, tags::lrc_path(Path::new(&old)));
                         }
+                        let bak = tags::lrc_backup_path(Path::new(&entry.path));
+                        if bak.exists() {
+                            let _ = std::fs::rename(bak, tags::lrc_backup_path(Path::new(&old)));
+                        }
                         self.repath(&entry.path, &old);
                         touched.push((entry.path.clone(), old.clone()));
                     }
@@ -158,11 +188,12 @@ impl History {
                     if let Some(x) = e.iter_mut().find(|x| x.id == entry.id) {
                         x.undone = true;
                     }
-                    self.persist(&e);
+                    self.persist_throttled(&e);
                 }
                 Err(err) => errors.push(format!("{}: {err}", entry.path)),
             }
         }
+        self.flush();
         if !errors.is_empty() && touched.is_empty() {
             return Err(errors.join("\n"));
         }

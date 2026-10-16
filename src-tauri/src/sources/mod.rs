@@ -1,6 +1,12 @@
 pub mod acoustid;
 pub mod deezer;
+pub mod genius;
+pub mod html;
 pub mod http;
 pub mod itunes;
 pub mod lrclib;
+pub mod lyrics;
+pub mod lyricsovh;
 pub mod musicbrainz;
+pub mod netease;
+pub mod tekstowo;

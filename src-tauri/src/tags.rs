@@ -57,6 +57,72 @@ pub fn lrc_path(path: &Path) -> PathBuf {
     path.with_extension("lrc")
 }
 
+/// Ukryta kopia .lrc na systemach bez atrybutu „ukryty” (Android/Linux): `.nazwa.lrc`.
+pub fn lrc_backup_path(path: &Path) -> PathBuf {
+    let lrc = lrc_path(path);
+    let name = lrc.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    lrc.with_file_name(format!(".{name}"))
+}
+
+/// Zapisuje plik tekstowy, opcjonalnie jako ukryty (Windows). Zachowuje istniejący atrybut ukrycia –
+/// bez tego Windows odmawia nadpisania ukrytego pliku.
+pub fn write_text_file(path: &Path, text: &str, hide: bool) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::io::Write;
+        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+        const HIDDEN: u32 = 0x2;
+        const SYSTEM: u32 = 0x4;
+        let existing = std::fs::metadata(path).map(|m| m.file_attributes() & (HIDDEN | SYSTEM)).unwrap_or(0);
+        let attrs = existing | if hide { HIDDEN } else { 0 };
+        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).attributes(attrs).open(path)?;
+        return f.write_all(text.as_bytes());
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = hide;
+        std::fs::write(path, text)
+    }
+}
+
+/// Ukrywa istniejący plik .lrc. Windows: atrybut „ukryty”; inne systemy: zmiana nazwy na `.nazwa.lrc`
+/// (odtwarzacze go wtedy nie widzą, ale kopia zostaje).
+pub fn hide_lrc(audio: &Path) -> std::io::Result<()> {
+    let lrc = lrc_path(audio);
+    #[cfg(windows)]
+    {
+        let text = std::fs::read(&lrc)?;
+        let text = String::from_utf8_lossy(&text).to_string();
+        write_text_file(&lrc, &text, true)
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::rename(&lrc, lrc_backup_path(audio))
+    }
+}
+
+/// Czyta plik .lrc (UTF-8, z BOM lub bez; inne kodowania – stratnie).
+pub fn read_lrc(audio: &Path) -> Option<String> {
+    let b = std::fs::read(lrc_path(audio)).ok()?;
+    let b = b.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&b);
+    let s = match std::str::from_utf8(b) {
+        Ok(s) => s.to_string(),
+        // Starsze pliki .lrc bywają w Windows-1250 – zamiana bajtów > 0x7F na znaki z tej strony kodowej.
+        Err(_) => b.iter().map(|&c| cp1250(c)).collect(),
+    };
+    let s = s.replace("\r\n", "\n");
+    (!s.trim().is_empty()).then_some(s)
+}
+
+fn cp1250(c: u8) -> char {
+    const HI: &str = "€\u{81}‚\u{83}„…†‡\u{88}‰Š‹ŚŤŽŹ\u{90}‘’“”•–—\u{98}™š›śťžź ˇ˘Ł¤Ą¦§¨©Ş«¬\u{AD}®Ż°±˛ł´µ¶·¸ąş»Ľ˝ľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖ×ŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőö÷řůúűüýţ˙";
+    if c < 0x80 {
+        c as char
+    } else {
+        HI.chars().nth((c - 0x80) as usize).unwrap_or('?')
+    }
+}
+
 pub fn track_id(path: &str) -> String {
     // Stabilny identyfikator – hash ścieżki.
     let mut h: u64 = 0xcbf29ce484222325;
@@ -171,10 +237,16 @@ pub fn read_track(path: &Path) -> Track {
             if let Some(l) = lyr {
                 t.lyrics_synced = is_synced_lyrics(&l);
                 t.lyrics = Some(l);
-            } else if t.lrc_file {
-                if let Ok(l) = std::fs::read_to_string(lrc_path(path)) {
-                    t.lyrics_synced = is_synced_lyrics(&l);
-                    t.lyrics = Some(l);
+                t.lyrics_in_tag = true;
+            }
+            // Plik .lrc z czasami jest lepszy niż zwykły tekst w tagu – pokazujemy go.
+            if t.lrc_file && !t.lyrics_synced {
+                if let Some(l) = read_lrc(path) {
+                    if t.lyrics.is_none() || is_synced_lyrics(&l) {
+                        t.lyrics_synced = is_synced_lyrics(&l);
+                        t.lyrics = Some(l);
+                        t.lyrics_in_tag = false;
+                    }
                 }
             }
         }
@@ -215,6 +287,9 @@ pub fn evaluate(t: &mut Track, min_cover: u32) {
             missing.push("syncedLyrics".into());
         }
         (None, _) => missing.push("lyrics".into()),
+    }
+    if t.lrc_file && !t.lyrics_in_tag && t.lyrics.is_some() {
+        missing.push("lrcOnly".into());
     }
     t.missing = missing;
     t.score = score.min(100) as u8;
@@ -353,6 +428,7 @@ fn apply_field(tag: &mut Tag, name: &str, value: Option<String>) {
 pub fn write(path: &Path, req: &WriteRequest) -> Result<(), String> {
     let mut file = lofty::read_from_path(path).map_err(|e| format!("Nie można otworzyć pliku: {e}"))?;
     let tag_type = file.primary_tag_type();
+    let file_type = file.file_type();
     if file.primary_tag().is_none() {
         // Przenieś dane z innych tagów (np. ID3v1), żeby nic nie zginęło.
         let mut tag = Tag::new(tag_type);
@@ -424,7 +500,25 @@ pub fn write(path: &Path, req: &WriteRequest) -> Result<(), String> {
     } else {
         file.save_to_path(path, opts).map_err(|e| format!("Zapis nie powiódł się: {e}"))?;
     }
+    if file_type == FileType::Wav {
+        sync_riff_info(path, opts)?;
+    }
     Ok(())
+}
+
+/// WAV: dane trzymamy w ID3v2 (pełne tagi, okładka, tekst), ale Eksplorator Windows i część
+/// odtwarzaczy czyta tylko blok RIFF INFO – uzupełniamy go tymi samymi podstawowymi polami,
+/// żeby stare wartości nie „wracały”.
+fn sync_riff_info(path: &Path, opts: WriteOptions) -> Result<(), String> {
+    const RIFF_FIELDS: &[&str] = &["title", "artist", "album", "year", "track", "genre", "composer", "comment"];
+    let file = lofty::read_from_path(path).map_err(|e| format!("WAV: {e}"))?;
+    // Brak ID3 po zapisie = wszystkie pola wyczyszczone (np. cofnięcie zmian).
+    let f = file.tag(TagType::Id3v2).map(read_fields).unwrap_or_default();
+    let mut info = file.tag(TagType::RiffInfo).cloned().unwrap_or_else(|| Tag::new(TagType::RiffInfo));
+    for name in RIFF_FIELDS {
+        apply_field(&mut info, name, f.get(name));
+    }
+    info.save_to_path(path, opts).map_err(|e| format!("WAV (RIFF INFO): {e}"))
 }
 
 /// Migawka stanu pliku przed zmianą (do cofania).
@@ -440,13 +534,20 @@ pub struct Snapshot {
 pub fn snapshot(path: &Path) -> Option<Snapshot> {
     let file = lofty::read_from_path(path).ok()?;
     let tag = file.primary_tag();
+    // Pola także z pozostałych tagów (np. RIFF INFO w WAV, ID3v1) – inaczej cofnięcie by je wymazało.
+    let mut fields = tag.map(read_fields).unwrap_or_default();
+    for other in file.tags() {
+        if Some(other.tag_type()) != tag.map(|t| t.tag_type()) {
+            merge_missing(&mut fields, &read_fields(other));
+        }
+    }
     Some(Snapshot {
-        fields: tag.map(read_fields).unwrap_or_default(),
+        fields,
         cover_b64: tag
             .and_then(best_picture)
             .map(|p| base64::engine::general_purpose::STANDARD.encode(p.data())),
         lyrics: tag.and_then(|t| clean(t.get_string(&ItemKey::Lyrics))),
-        lrc: std::fs::read_to_string(lrc_path(path)).ok(),
+        lrc: read_lrc(path),
     })
 }
 
@@ -463,7 +564,11 @@ pub fn restore(path: &Path, snap: &Snapshot) -> Result<(), String> {
     write(path, &req)?;
     let lrc = lrc_path(path);
     match &snap.lrc {
-        Some(text) => std::fs::write(&lrc, text).map_err(|e| e.to_string())?,
+        Some(text) => {
+            write_text_file(&lrc, text, false).map_err(|e| e.to_string())?;
+            // Kopia ukryta przy przenoszeniu do pliku (Android/Linux) jest już zbędna.
+            let _ = std::fs::remove_file(lrc_backup_path(path));
+        }
         None => {
             let _ = std::fs::remove_file(&lrc);
         }
@@ -478,4 +583,17 @@ pub fn file_type_supported(path: &Path) -> bool {
         .and_then(|p| p.file_type())
         .map(|ft| !matches!(ft, FileType::Custom(_)))
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod lrc_tests {
+    #[test]
+    fn cp1250_table() {
+        assert_eq!(super::cp1250(0xB3), 'ł');
+        assert_eq!(super::cp1250(0xA5), 'Ą');
+        assert_eq!(super::cp1250(0xEA), 'ę');
+        assert_eq!(super::cp1250(0x9C), 'ś');
+        assert_eq!(super::cp1250(0xBF), 'ż');
+        assert_eq!(super::cp1250(0xFF), '˙');
+    }
 }

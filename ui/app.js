@@ -37,7 +37,9 @@ const S = {
   visible: [],
   history: null,
   storageOk: true,
-  rv: { conf: 'all', types: new Set(), q: '', active: null, sel: new Set(), detail: false, skip: new Set(JSON.parse(store('skipFields') || '[]')) },
+  rv: { conf: 'all', types: new Set(), q: '', active: null, sel: new Set(), detail: false, skip: new Set(JSON.parse(store('skipFields') || '[]')), hideSame: !!store('rvHideSame') },
+  /** Wynik łączony sprzed wyboru innego dopasowania (do przywrócenia). */
+  rvOrig: new Map(),
 };
 const isMobile = () => matchMedia('(max-width: 760px)').matches;
 const isAndroid = () => S.info.platform === 'android';
@@ -68,7 +70,7 @@ const baseName = (p) => String(p || '').split(/[\\/]/).filter(Boolean).pop() || 
 const fold = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ł/g, 'l');
 const fieldLabel = (f) => t('f_' + f);
 const CORE = ['title', 'artist', 'album', 'year', 'track'];
-const MISS_KEYS = ['title', 'artist', 'album', 'albumArtist', 'year', 'track', 'genre', 'cover', 'coverSmall', 'lyrics', 'syncedLyrics'];
+const MISS_KEYS = ['title', 'artist', 'album', 'albumArtist', 'year', 'track', 'genre', 'cover', 'coverSmall', 'lyrics', 'syncedLyrics', 'lrcOnly'];
 const STATUSES = ['idle', 'proposed', 'applied', 'upToDate', 'notFound', 'error'];
 
 let rq = null;
@@ -259,6 +261,7 @@ function upsert(tr, proposal) {
   if (proposal) {
     applySkipFields(proposal);
     S.proposals.set(tr.id, proposal);
+    S.rvOrig.delete(tr.id);
   } else if (!['proposed', 'error', 'queued', 'working'].includes(tr.status)) S.proposals.delete(tr.id);
 }
 function replaceTrack(oldId, tr) {
@@ -293,6 +296,7 @@ const QUICK = {
   noCover: (x) => x.missing.includes('cover') || x.missing.includes('coverSmall'),
   noLyrics: (x) => x.missing.includes('lyrics'),
   noSynced: (x) => !x.lyricsSynced,
+  lrcOnly: (x) => x.missing.includes('lrcOnly'),
   proposed: (x) => x.status === 'proposed' && S.proposals.has(x.id),
   dups: (x) => S.dupIndex.has(x.id),
   problems: (x) => x.status === 'notFound' || x.status === 'error',
@@ -475,20 +479,34 @@ function renderTopbar() {
 }
 
 function renderJobs() {
+  // Karta postępu leży w doku nad treścią (#dock), więc nie zmienia układu widoku.
+  // Przy aktualizacji zmieniamy tylko tekst i szerokość paska, bez przebudowy DOM.
   const box = $('#jobs');
-  let html = '';
+  const rows = [];
   const sc = S.scan;
   if (sc && sc.phase !== 'done') {
-    const pct = sc.total ? (sc.done / sc.total) * 100 : 0;
-    html += `<div class="job">${icon('refresh', 'sm spin')}<span>${esc(sc.total ? t('scanning', { done: sc.done, total: sc.total }) : t('collecting'))}</span><div class="lp ${sc.total ? '' : 'indet'}"><i style="width:${pct}%"></i></div><button class="btn text sm" data-act="cancel">${esc(t('stop'))}</button></div>`;
+    rows.push({ key: 'scan', ic: icon('refresh', 'sm spin'), text: sc.total ? t('scanning', { done: sc.done, total: sc.total }) : t('collecting'), pct: sc.total ? (sc.done / sc.total) * 100 : null });
   }
   for (const kind of ['analyze', 'apply']) {
     const j = S.jobs[kind];
     if (!j?.running) continue;
-    const pct = j.total ? (j.done / j.total) * 100 : 0;
-    html += `<div class="job">${icon(kind === 'apply' ? 'download' : 'sparkles', 'sm')}<span>${esc(t(kind === 'apply' ? 'applying' : 'analyzing', { done: j.done, total: j.total }))}</span><div class="lp"><i style="width:${pct}%"></i></div><button class="btn text sm" data-act="cancel">${esc(t('stop'))}</button></div>`;
+    rows.push({ key: kind, ic: icon(kind === 'apply' ? 'download' : 'sparkles', 'sm'), text: t(kind === 'apply' ? 'applying' : 'analyzing', { done: j.done, total: j.total }), pct: j.total ? (j.done / j.total) * 100 : 0 });
   }
-  box.innerHTML = html;
+  document.body.classList.toggle('has-jobs', rows.length > 0);
+  if (!rows.length) { box.innerHTML = ''; return; }
+  const sig = rows.map((r) => r.key + (r.pct === null ? '?' : '')).join(',');
+  let card = $('.jobs-card', box);
+  if (!card || card.dataset.sig !== sig) {
+    box.innerHTML = `<div class="jobs-card" data-sig="${sig}">${rows.map((r) => `<div class="job" data-job="${r.key}">${r.ic}<span class="txt"></span><span class="row" style="gap:0"><span class="pct"></span><button class="btn text sm" data-act="cancel">${esc(t('stop'))}</button></span><div class="lp ${r.pct === null ? 'indet' : ''}"><i></i></div></div>`).join('')}</div>`;
+    card = $('.jobs-card', box);
+  }
+  for (const r of rows) {
+    const el = $(`[data-job="${r.key}"]`, card);
+    const txt = $('.txt', el);
+    if (txt.textContent !== r.text) { txt.textContent = r.text; txt.title = r.text; }
+    $('.pct', el).textContent = r.pct === null ? '' : Math.floor(r.pct) + '%';
+    if (r.pct !== null) $('.lp > i', el).style.width = r.pct + '%';
+  }
 }
 
 // ═════════════════════════════ Widoki ═════════════════════════════
@@ -566,15 +584,18 @@ function renderSummary() {
   const okCover = S.tracks.filter((x) => !QUICK.noCover(x)).length;
   const okLyr = S.tracks.filter((x) => x.lyricsSynced).length;
   const need = S.tracks.filter((x) => x.score < 100).length;
+  const lrcN = S.tracks.filter(QUICK.lrcOnly).length;
   const bar = (k, label, ok) => `<div class="sum-bar" data-quick="${k}" title="${esc(t('showMissing'))}"><div class="row"><span>${esc(label)}</span><b>${ok}/${n}</b></div><div class="lp"><i style="width:${(ok / n) * 100}%"></i></div></div>`;
   $('#summary').innerHTML = `<div class="summary">
     <svg class="ring" viewBox="0 0 64 64"><circle class="bg" cx="32" cy="32" r="27"/><circle class="fg" cx="32" cy="32" r="27" stroke-dasharray="169.6" style="stroke-dashoffset:${169.6 * (1 - avg / 100)}"/><text x="32" y="33">${avg}%</text></svg>
     <div class="sum-main"><div class="big">${esc(t('nTracks', { n }))}</div><div class="t-body-s muted">${need ? esc(t('needWork', { n: need })) : esc(t('allComplete'))}</div></div>
-    <div class="sum-bars">${bar('missingTags', t('sumTags'), okTags)}${bar('noCover', t('sumCovers'), okCover)}${bar('noSynced', t('sumLyrics'), okLyr)}</div></div>`;
+    <div class="sum-bars">${bar('missingTags', t('sumTags'), okTags)}${bar('noCover', t('sumCovers'), okCover)}${bar('noSynced', t('sumLyrics'), okLyr)}</div></div>
+    ${lrcN ? `<div class="lrc-banner">${icon('lyrics')}<span class="grow">${esc(t('lrcFound', { n: lrcN }))}</span><button class="btn tonal sm has-ic" data-act="merge-lrc">${icon('check')}${esc(t('lrcMerge'))}</button></div>` : ''}`;
 }
 function renderTools() {
   const c = counts();
-  const chip = (k, ic) => (k === 'all' || c[k] || S.quick === k ? `<button class="chip ${S.quick === k ? 'on' : ''}" data-quick="${k}">${icon('check', 'chk')}${ic && S.quick !== k ? icon(ic) : ''}${esc(t('q_' + k))}<span class="n">${c[k]}</span></button>` : '');
+  // Chipy są zawsze widoczne (puste wyszarzone), żeby rząd nie przeskakiwał, gdy liczniki rosną.
+  const chip = (k, ic) => (`<button class="chip ${S.quick === k ? 'on' : ''} ${k !== 'all' && !c[k] && S.quick !== k ? 'zero' : ''}" data-quick="${k}">${icon('check', 'chk')}${ic && S.quick !== k ? icon(ic) : ''}${esc(t('q_' + k))}<span class="n">${c[k]}</span></button>`);
   const advN = advCount();
   const advChips = [];
   for (const f of S.adv.formats) advChips.push(['formats', f, f]);
@@ -589,7 +610,7 @@ function renderTools() {
       ${qchip}
       ${S.album ? `<button class="chip input" data-rm="album">${icon('disc', 'sm')}${esc(albumName)}<span class="x">${icon('x', 'sm')}</span></button>` : ''}
       ${advChips.map(([k, v, l]) => `<button class="chip input" data-rm="${k}" data-v="${esc(v)}">${esc(l)}<span class="x">${icon('x', 'sm')}</span></button>`).join('')}
-      ${chip('all')}${chip('missingTags')}${chip('noCover')}${chip('noLyrics')}${chip('noSynced')}${chip('proposed', 'sparkles')}${chip('dups', 'duplicate')}${chip('problems', 'alert')}${chip('complete')}
+      ${chip('all')}${chip('missingTags')}${chip('noCover')}${chip('noLyrics')}${chip('noSynced')}${chip('lrcOnly', 'lyrics')}${chip('proposed', 'sparkles')}${chip('dups', 'duplicate')}${chip('problems', 'alert')}${chip('complete')}
     </div>
     <button class="ibtn" data-act="sort-menu" title="${esc(t('sortBy'))}">${icon('sort')}</button>
     <div class="seg sm"><button class="${S.mode === 'list' ? 'on' : ''}" data-mode="list" title="${esc(t('viewList'))}">${icon('list', 'sm')}</button><button class="${S.mode === 'albums' ? 'on' : ''}" data-mode="albums" title="${esc(t('viewAlbums'))}">${icon('grid', 'sm')}</button></div>`;
@@ -959,6 +980,17 @@ function reviewList() {
   }).sort((a, b) => S.proposals.get(b.id).confidence - S.proposals.get(a.id).confidence || (a.path < b.path ? -1 : 1));
 }
 const newVal = (p, f, x) => p.changes.find((c) => c.field === f && c.enabled)?.new ?? x.tags[f];
+/** Wszystkie pola tagów w edytorze weryfikacji (kolejność wyświetlania). */
+const RV_FIELDS = ['title', 'artist', 'album', 'albumArtist', 'year', 'track', 'trackTotal', 'disc', 'discTotal', 'genre', 'composer', 'label', 'isrc', 'bpm', 'comment', 'mbRecordingId', 'mbReleaseId'];
+const curTag = (x, f) => (x.tags[f] == null || x.tags[f] === '' ? null : String(x.tags[f]));
+const isSyncedText = (s) => /^\s*\[\d{1,3}:\d{2}/m.test(s || '');
+/** Źródła, z których złożono wynik: tagi + wybrana okładka + tekst. */
+function resultSources(p) {
+  const out = [...(p.sources || [])];
+  if (p.coverEnabled && p.covers[p.coverChoice]) out.push(p.covers[p.coverChoice].source.split(' · ')[0]);
+  if (p.lyricsEnabled && p.lyrics?.source) out.push(p.lyrics.source);
+  return [...new Set(out.map((s) => (s === 'tags' ? t('srcOwnTags') : s === 'manual' ? t('srcManual') : s)))];
+}
 function renderReview(v) {
   const all = pendingProposals();
   if (!all.length) {
@@ -1020,6 +1052,11 @@ function renderReviewPane(list) {
   const prevBody = $('.rv-body', pane);
   const scroll = prevBody?.dataset.id === x.id ? prevBody.scrollTop : 0;
   const nothing = !p.changes.length && !p.covers.length && !p.lyrics;
+  const srcs = resultSources(p);
+  const hideSame = S.rv.hideSame;
+  const rows = RV_FIELDS.filter((f) => p.changes.some((c) => c.field === f) || (!hideSame && curTag(x, f) != null) || (!hideSame && CORE.includes(f)));
+  const lyrText = p.lyrics && !p.lyrics.instrumental ? p.lyrics.synced || p.lyrics.plain || '' : x.lyrics || '';
+  const lyrProposed = !!(p.lyrics && !p.lyrics.instrumental);
   const curUrl = x.cover ? S.covers.get(x.id + ':300') : null;
   if (x.cover && curUrl === undefined) wantCover(x.id, 300);
   pane.innerHTML = `<div class="rv-body" data-id="${x.id}">
@@ -1029,24 +1066,40 @@ function renderReviewPane(list) {
         <div class="muted">${esc([newVal(p, 'artist', x), newVal(p, 'album', x), newVal(p, 'year', x)].filter(Boolean).join(' · '))}</div>
         <div class="t-body-s dim ellipsis" style="margin-top:4px" title="${esc(x.path)}">${esc(x.fileName)}</div>
         <div class="row wrap" style="margin-top:10px"><span class="conf ${confCls(p.confidence)}">${esc(t('confidenceN', { p: Math.round(p.confidence * 100) }))}</span><span class="tag">${icon(p.method === 'fingerprint' ? 'fingerprint' : 'search')}${esc(t('m_' + p.method))}</span>
-          ${alt.length > 1 ? `<button class="btn text sm has-ic" id="rv-alts">${icon('layers')}${esc(t('altN', { n: alt.length }))}</button>` : ''}</div></div></div>
+          ${alt.length > 1 || S.rvOrig.has(x.id) ? `<button class="btn text sm has-ic" id="rv-alts">${icon('layers')}${esc(t('altN', { n: alt.length }))}</button>` : ''}</div>
+        ${srcs.length ? `<div class="t-body-s muted" style="margin-top:6px">${icon('layers', 'sm')} ${esc(t(srcs.length > 1 ? 'combinedFrom' : 'resultFrom', { s: srcs.join(' + ') }))}</div>` : ''}</div></div>
     ${x.error ? `<div class="banner err">${icon('alert')}<span class="selectable t-body-s">${esc(x.error)}</span></div>` : ''}
     ${nothing ? `<p class="muted">${esc(t('nothingToChange'))}</p>` : ''}
-    ${p.changes.length ? `<div class="sec-title">${icon('tag')}<span class="grow">${esc(t('tagChanges'))} <span class="muted">${nOn}/${p.changes.length}</span></span><button class="btn text sm" id="rv-all-fields">${esc(nOn === p.changes.length ? t('noneFields') : t('allFields'))}</button></div>
-      <div class="diff-wrap"><table class="diff"><tbody>${p.changes.map((c, i) => `<tr class="${c.enabled ? '' : 'off'}">
-        <td class="cbc"><span class="cbw" data-chcb="${i}"><span class="cb ${c.enabled ? 'on' : ''}">${icon('check')}</span></span></td>
-        <td class="k">${esc(fieldLabel(c.field))}</td>
-        <td class="new"><span contenteditable="true" spellcheck="false" data-edit="${i}">${esc(c.new ?? '')}</span></td>
-        <td class="old ${c.old ? '' : 'none'}">${c.old ? esc(c.old) : esc(t('emptyVal'))}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    <div class="sec-title">${icon('tag')}<span class="grow">${esc(t('tagChanges'))} <span class="muted" id="rv-non">${nOn}/${p.changes.length}</span></span>
+      <button class="btn text sm" id="rv-hide-same">${esc(t(hideSame ? 'showAllTags' : 'hideSameTags'))}</button>
+      ${p.changes.length ? `<button class="btn text sm" id="rv-all-fields">${esc(nOn === p.changes.length ? t('noneFields') : t('allFields'))}</button>` : ''}</div>
+    <div class="diff-wrap"><table class="diff"><tbody>${rows.map((f) => {
+      const c = p.changes.find((y) => y.field === f);
+      const cur = curTag(x, f);
+      if (!c) return `<tr class="same" data-row="${f}">
+        <td class="cbc"><span class="cbw" data-chcb="${f}"><span class="cb">${icon('check')}</span></span></td>
+        <td class="k">${esc(fieldLabel(f))}</td>
+        <td class="new"><span contenteditable="true" spellcheck="false" data-edit="${f}" data-ph="${esc(t('emptyVal'))}">${esc(cur ?? '')}</span></td>
+        <td class="old none">${esc(t('unchanged'))}</td></tr>`;
+      return `<tr class="${c.enabled ? '' : 'off'}" data-row="${f}">
+        <td class="cbc"><span class="cbw" data-chcb="${f}"><span class="cb ${c.enabled ? 'on' : ''}">${icon('check')}</span></span></td>
+        <td class="k">${esc(fieldLabel(f))}</td>
+        <td class="new"><span contenteditable="true" spellcheck="false" data-edit="${f}" data-ph="${esc(t('emptyVal'))}">${esc(c.new ?? '')}</span></td>
+        <td class="old ${c.old ? '' : 'none'}">${c.old ? esc(c.old) : esc(t('emptyVal'))}</td></tr>`;
+    }).join('')}</tbody></table></div>
     ${p.covers.length ? `<div class="sec-title">${icon('image')}<span class="grow">${esc(t('coverSec'))}</span><span class="t-body-s muted">${esc(p.coverEnabled ? (x.cover ? t('willReplace') : t('willAdd')) : t('willKeep'))}</span><button class="switch ${p.coverEnabled ? 'on' : ''}" id="rv-cover-on"></button></div>
       <div class="covers"><div class="cv current"><div class="img" ${x.cover ? `data-cover="${x.id}:300"` : ''}>${curUrl ? `<img src="${curUrl}" alt="">` : icon(x.cover ? 'disc' : 'image')}</div>
           <div class="src">${esc(t('currentCover'))}</div><div class="res ${x.cover && x.cover.width < min ? 'low' : ''}">${x.cover ? `${x.cover.width}×${x.cover.height} px` : esc(t('none'))}</div></div>
         <div class="arrow-sep">${icon('chevronRight', 'lg')}</div>
         ${p.covers.map((c, i) => { coverRes(c.url); return `<div class="cv ${p.coverEnabled && p.coverChoice === i ? 'on' : ''}" data-cpick="${i}"><span class="check">${icon('check')}</span><div class="img"><img src="${esc(c.thumb)}" alt="" loading="lazy" onerror="this.closest('.cv').style.display='none'"></div>
           <div class="src ellipsis" title="${esc(c.source)}">${esc(c.source)}</div>${resHTML(c.url)}</div>`; }).join('')}</div>` : ''}
-    ${p.lyrics ? `<div class="sec-title">${icon('lyrics')}<span class="grow">${esc(t('lyricsSec'))} ${p.lyrics.synced ? `<span class="tag ok">${icon('clock')}${esc(t('synced'))}</span>` : `<span class="tag">${esc(t('plain'))}</span>`}</span>
-        ${p.lyrics.instrumental ? '' : `<span class="t-body-s muted">${esc(p.lyricsEnabled ? (x.lyrics ? t('willReplace') : t('willAdd')) : t('willSkip'))}</span><button class="switch ${p.lyricsEnabled ? 'on' : ''}" id="rv-lyr-on"></button>`}</div>
-      ${p.lyrics.instrumental ? `<p class="muted">${esc(t('instrumental'))}</p>` : `<div class="lyr-prev">${esc(p.lyrics.synced || p.lyrics.plain || '')}</div>`}` : ''}
+    <div class="sec-title">${icon('lyrics')}<span class="grow">${esc(t('lyricsSec'))} ${lyrText ? (isSyncedText(lyrText) ? `<span class="tag ok">${icon('clock')}${esc(t('synced'))}</span>` : `<span class="tag">${esc(t('plain'))}</span>`) : `<span class="tag bad">${esc(t('noLyricsTag'))}</span>`}
+        <span class="t-body-s muted">${esc(lyrProposed ? (p.lyrics.source === 'manual' ? t('srcManual') : p.lyrics.source) : x.lyrics ? t('currentLyrics') : '')}</span></span>
+        <span class="t-body-s muted" id="rv-lyr-state">${esc(p.lyricsEnabled ? (x.lyrics ? t('willReplace') : t('willAdd')) : lyrProposed ? t('willSkip') : t('willKeep'))}</span>
+        <button class="switch ${p.lyricsEnabled ? 'on' : ''}" id="rv-lyr-on" ${lyrProposed ? '' : 'disabled'}></button>
+        <button class="ibtn" id="rv-lyr-search" title="${esc(t('lyricsSearch'))}">${icon('search', 'sm')}</button></div>
+      ${p.lyrics?.instrumental ? `<p class="muted">${esc(t('instrumental'))}</p>` : ''}
+      <textarea class="ta lyr-edit" id="rv-lyr" spellcheck="false" placeholder="${esc(t('lyricsPh'))}">${esc(lyrText)}</textarea>
     ${(p.notes || []).filter((n) => n !== 'instrumental').length ? `<div class="sec-title">${icon('info')}${esc(t('notes'))}</div><div class="t-body-s muted selectable">${p.notes.filter((n) => n !== 'instrumental').map(esc).join('<br>')}</div>` : ''}
     </div>
     <div class="rv-actions">
@@ -1062,25 +1115,75 @@ function renderReviewPane(list) {
   $('.rv-body', pane).scrollTop = scroll;
   const save = debounce(() => invoke('update_proposal', { proposal: p }), 200);
   const rerender = () => { save(); renderReviewPane(list); renderReviewList(list, pendingProposals()); };
-  $$('[data-chcb]', pane).forEach((el) => { el.onclick = () => { const c = p.changes[+el.dataset.chcb]; c.enabled = !c.enabled; rerender(); }; });
+  const liveCounts = () => {
+    const n = p.changes.filter((c) => c.enabled).length;
+    if ($('#rv-non', pane)) $('#rv-non', pane).textContent = `${n}/${p.changes.length}`;
+    const acc = $('[data-act="rv-accept"]', pane);
+    if (acc) acc.disabled = !(p.changes.length || p.covers.length || p.lyrics);
+  };
+  $$('[data-chcb]', pane).forEach((el) => { el.onclick = () => { const c = p.changes.find((y) => y.field === el.dataset.chcb); if (!c) return; c.enabled = !c.enabled; rerender(); }; });
   $$('[data-edit]', pane).forEach((el) => {
-    el.addEventListener('input', () => { const c = p.changes[+el.dataset.edit]; c.new = el.textContent.trim() || null; c.enabled = true; el.closest('tr').classList.remove('off'); $('.cb', el.closest('tr')).classList.add('on'); save(); });
+    el.addEventListener('input', () => {
+      const f = el.dataset.edit;
+      const val = el.textContent.trim() || null;
+      const cur = curTag(x, f);
+      const tr = el.closest('tr');
+      let c = p.changes.find((y) => y.field === f);
+      // Ręczna zmiana pola, którego wyszukiwanie nie ruszało – dopisywana do propozycji.
+      if (!c && val !== cur) { c = { field: f, old: cur, new: val, enabled: true, manual: true }; p.changes.push(c); tr.classList.remove('same'); $('.old', tr).textContent = cur ?? t('emptyVal'); }
+      else if (c?.manual && val === cur) { p.changes.splice(p.changes.indexOf(c), 1); c = null; tr.classList.add('same'); $('.old', tr).textContent = t('unchanged'); }
+      else if (c) { c.new = val; c.enabled = true; }
+      tr.classList.remove('off');
+      $('.cb', tr).classList.toggle('on', !!c);
+      liveCounts();
+      save();
+    });
     el.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); el.blur(); } });
   });
+  $('#rv-hide-same', pane).onclick = () => { S.rv.hideSame = !S.rv.hideSame; store('rvHideSame', S.rv.hideSame ? '1' : ''); renderReviewPane(list); };
+  const lyr = $('#rv-lyr', pane);
+  const setLyrics = (text) => {
+    text = (text || '').trim();
+    const sw = $('#rv-lyr-on', pane);
+    if (!text || text === (x.lyrics || '').trim()) {
+      if (p.lyrics?.source === 'manual') { p.lyrics = null; }
+      p.lyricsEnabled = false;
+    } else {
+      const sync = isSyncedText(text);
+      p.lyrics = { synced: sync ? text : null, plain: sync ? null : text, source: 'manual', instrumental: false };
+      p.lyricsEnabled = true;
+    }
+    sw.disabled = !p.lyrics || p.lyrics.instrumental;
+    sw.classList.toggle('on', p.lyricsEnabled);
+    $('#rv-lyr-state', pane).textContent = p.lyricsEnabled ? (x.lyrics ? t('willReplace') : t('willAdd')) : p.lyrics ? t('willSkip') : t('willKeep');
+    liveCounts();
+    save();
+  };
+  lyr.addEventListener('input', () => setLyrics(lyr.value));
+  lyr.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') { e.preventDefault(); lyr.blur(); } });
+  $('#rv-lyr-search', pane).onclick = () => lyricsSearch(x, (txt) => { lyr.value = txt; setLyrics(txt); renderReviewPane(list); });
   if ($('#rv-all-fields', pane)) $('#rv-all-fields', pane).onclick = () => { const on = nOn !== p.changes.length; p.changes.forEach((c) => (c.enabled = on)); rerender(); };
   if ($('#rv-cover-on', pane)) $('#rv-cover-on', pane).onclick = () => { p.coverEnabled = !p.coverEnabled; if (p.coverChoice == null) p.coverChoice = 0; rerender(); };
-  if ($('#rv-lyr-on', pane)) $('#rv-lyr-on', pane).onclick = () => { p.lyricsEnabled = !p.lyricsEnabled; rerender(); };
+  $('#rv-lyr-on', pane).onclick = () => { if (!p.lyrics || p.lyrics.instrumental) return; p.lyricsEnabled = !p.lyricsEnabled; rerender(); };
   $$('[data-cpick]', pane).forEach((el) => {
     el.onclick = () => { const i = +el.dataset.cpick; if (p.coverEnabled && p.coverChoice === i) p.coverEnabled = false; else { p.coverChoice = i; p.coverEnabled = true; } rerender(); };
   });
-  if ($('#rv-alts', pane)) $('#rv-alts', pane).onclick = (e) => menu(e.currentTarget, alt.map((a, i) => ({
-    icon: p.chosen === i ? 'check' : 'disc',
-    label: `${a.fields.title || ''} — ${[a.fields.album, a.fields.year, a.secondaryTypes?.join('/')].filter(Boolean).join(' · ')}`,
-    end: `${a.source} · ${Math.round(a.score * 100)}%`,
-    run: async () => {
-      try { const np = await invoke('choose_alternative', { id: x.id, index: i }); applySkipFields(np); S.proposals.set(x.id, np); refreshReview(); } catch (err) { snack(errMsg(err), 'bad'); }
-    },
-  })));
+  // Wynik łączony (wszystkie źródła) jest podstawowy; pojedyncze dopasowania to alternatywy.
+  const orig = S.rvOrig.get(x.id);
+  if ($('#rv-alts', pane)) $('#rv-alts', pane).onclick = (e) => menu(e.currentTarget, [
+    { icon: p.method !== 'manual' ? 'check' : 'layers', label: t('combinedResult'), end: orig ? `${Math.round(orig.confidence * 100)}%` : t('current'),
+      run: () => { if (!orig) return; const np = structuredClone(orig); S.proposals.set(x.id, np); invoke('update_proposal', { proposal: np }); refreshReview(); } },
+    'sep',
+    ...alt.map((a, i) => ({
+      icon: p.method === 'manual' && p.chosen === i ? 'check' : 'disc',
+      label: `${a.fields.title || ''} — ${[a.fields.album, a.fields.year, a.secondaryTypes?.join('/')].filter(Boolean).join(' · ')}`,
+      end: `${a.source} · ${Math.round(a.score * 100)}%`,
+      run: async () => {
+        if (!S.rvOrig.has(x.id) && p.method !== 'manual') S.rvOrig.set(x.id, structuredClone(p));
+        try { const np = await invoke('choose_alternative', { id: x.id, index: i }); applySkipFields(np); S.proposals.set(x.id, np); refreshReview(); } catch (err) { snack(errMsg(err), 'bad'); }
+      },
+    })),
+  ]);
 }
 function reviewStep(dir) {
   const list = reviewList();
@@ -1189,7 +1292,7 @@ function renderHistory(v) {
     map.get(e.batch).items.push(e);
   }
   const sumText = (e) => (e.action === 'rename' ? e.summary.join(', ') : e.summary.map((s) => (t('f_' + s) !== 'f_' + s ? t('f_' + s) : t('mi_' + s))).join(', '));
-  v.innerHTML = `<div class="page"><div class="page-inner">
+  v.innerHTML = `<div class="page"><div class="page-inner settings-cols">
     ${!h.length ? `<div class="empty">${icon('history', 'xl')}<h2>${esc(t('historyEmptyTitle'))}</h2><p>${esc(t('historyEmpty'))}</p></div>` : ''}
     ${batches.slice(0, 200).map((b) => {
       const active = b.items.filter((x) => !x.undone).length;
@@ -1231,6 +1334,7 @@ function renderSettings(v) {
       ${row(t('writeMode'), esc(t('writeModeD')), sel('writeMode', [['missing', t('wmMissing')], ['overwrite', t('wmOverwrite')]]))}
       ${swRow('autoApply', t('autoApply'), t('autoApplyD'))}
       ${row(t('threshold'), esc(t('thresholdD')), num('autoApplyThreshold', 0.6, 1, 0.01, (x) => Math.round(x * 100) + '%'))}
+      ${swRow('mixSources', t('mixSources'), t('mixSourcesD'))}
       ${swRow('preferOriginalRelease', t('preferOriginal'), t('preferOriginalD'))}
       ${swRow('fillAlbumArtist', t('fillAlbumArtist'))}${swRow('fillGenre', t('fillGenre'))}${swRow('writeMbIds', t('writeMbIds'), t('writeMbIdsD'))}
       ${row(t('concurrency'), esc(t('concurrencyD')), num('concurrency', 1, 8, 1, (x) => x))}</div>
@@ -1240,17 +1344,20 @@ function renderSettings(v) {
       ${row(t('coverQuality'), '', num('coverQuality', 60, 100, 1, (x) => x + '%'))}${swRow('saveFolderJpg', t('saveFolderJpg'), t('saveFolderJpgD'))}</div>
     <div class="list-card"><h2>${icon('lyrics')}${esc(t('sLyrics'))}</h2>
       ${swRow('fetchLyrics', t('fetchLyrics'))}${swRow('preferSynced', t('preferSynced'), t('preferSyncedD'))}
-      ${swRow('embedLyrics', t('embedLyrics'), t('embedLyricsD'))}${swRow('writeLrcFile', t('writeLrc'), t('writeLrcD'))}</div>
+      ${swRow('embedLyrics', t('embedLyrics'), t('embedLyricsD'))}${swRow('writeLrcFile', t('writeLrc'), t('writeLrcD'))}${swRow('hideLrcFiles', t('hideLrc'), t('hideLrcD'))}
+      ${swRow('mergeLrcFiles', t('mergeLrc'), t('mergeLrcD'))}
+      ${row(t('lrcAfter'), esc(t('lrcAfterD')), sel('lrcAfterMerge', [['hide', t('lrcHide')], ['delete', t('lrcDelete')], ['keep', t('lrcKeep')]]))}</div>
     <div class="list-card"><h2>${icon('layers')}${esc(t('sSources'))}</h2>
       ${swRow('useMusicbrainz', 'MusicBrainz + Cover Art Archive', t('srcMb'))}${swRow('useDeezer', 'Deezer', t('srcDeezer'))}${swRow('useItunes', 'Apple iTunes', t('srcItunes'))}
       ${row(t('itunesCountry'), '', sel('itunesCountry', [['PL', 'Polska'], ['US', 'USA'], ['GB', 'UK'], ['DE', 'Deutschland'], ['FR', 'France'], ['JP', 'Japan']]))}
-      ${swRow('useLrclib', 'LRCLIB', t('srcLrclib'))}
+      ${swRow('useLrclib', 'LRCLIB', t('srcLrclib'))}${swRow('useNetease', 'NetEase Cloud Music', t('srcNetease'))}
+      ${swRow('useTekstowo', 'Tekstowo.pl', t('srcTekstowo'))}${swRow('useGenius', 'Genius', t('srcGenius'))}${swRow('useLyricsovh', 'lyrics.ovh', t('srcLyricsovh'))}
       ${row('AcoustID', esc(t('srcAcoustid')) + ` <a href="#" id="acoustid-link">${esc(t('getKey'))}</a>`, sw('useAcoustid'), 'useAcoustid')}
       ${row(t('acoustidKey'), esc(t('acoustidKeyD')), `<input class="inp mono" data-text="acoustidKey" value="${esc(s.acoustidKey || '')}" placeholder="AbCdEf123">`)}</div>
     <div class="list-card"><h2>${icon('rename')}${esc(t('sRename'))}</h2>
       ${row(t('pattern'), esc(t('patternD')), `<input class="inp mono" data-text="renamePattern" value="${esc(s.renamePattern || '')}">`)}</div>
     <div class="list-card"><h2>${icon('info')}${esc(t('sAbout'))}</h2>
-      ${row('MusicTagger ' + S.info.version, esc(t('aboutD')), `<button class="btn tonal sm has-ic" id="chk-upd">${icon('update')}${esc(t('checkUpdates'))}</button>`)}
+      ${row('MusicTagger ' + S.info.version + (S.info.installKind === 'portable' ? ` (${t('portable')})` : ''), esc(t('aboutD')), `<button class="btn tonal sm has-ic" id="chk-upd">${icon('update')}${esc(t('checkUpdates'))}</button>`)}
       ${row(t('shortcuts'), esc(t('shortcutsD')), '')}
       ${row(t('dataDir'), `<span class="mono selectable">${esc(S.info.dataDir || '')}</span>`, '')}</div>
   </div></div>`;
@@ -1289,9 +1396,19 @@ function applyTheme() {
 async function checkUpdate(silent) {
   try {
     const u = await invoke('check_update');
-    if (u.available) snack(t('updateAvail', { v: u.latest }), 'info', { label: t('download'), run: () => opener()?.openUrl(u.download || u.url) });
-    else if (!silent) snack(t('upToDate'));
+    if (!u.available) { if (!silent) snack(t('upToDate')); return; }
+    const page = () => opener()?.openUrl(u.download || u.url);
+    if (u.canInstall && u.download) snack(t('updateAvail', { v: u.latest }), 'info', { label: t('updateNow'), run: () => installUpdate(u, page) });
+    else snack(t('updateAvail', { v: u.latest }), 'info', { label: t('download'), run: page });
   } catch (e) { if (!silent) snack(errMsg(e), 'bad'); }
+}
+/** Pobiera i instaluje aktualizację (instalator albo podmiana wersji przenośnej), potem restart. */
+async function installUpdate(u, fallback) {
+  if (S.jobs.apply?.running && !(await confirmBox(t('updateNow'), t('updateBusyQ'), t('updateNow')))) return;
+  snack(t('updating', { v: u.latest }));
+  try { await invoke('install_update', { url: u.download }); } catch (e) {
+    snack(`${t('updateFailed')}: ${errMsg(e)}`, 'bad', { label: t('download'), run: fallback });
+  }
 }
 
 // ═════════════════════════════ Akcje ═════════════════════════════
@@ -1408,7 +1525,10 @@ async function coverSearch(ids, query) {
   } catch (e) { snack(errMsg(e), 'bad'); }
 }
 async function lyricsSearch(x, onPick) {
-  let results = [], picked = null;
+  let results = [], picked = null, seq = 0;
+  const badge = (r) => r.loaded
+    ? (r.syncedLyrics ? `<span class="tag ok">${icon('clock')}${esc(t('synced'))}</span>` : r.plainLyrics ? `<span class="tag">${esc(t('plain'))}</span>` : `<span class="tag">${esc(t('instrumentalShort'))}</span>`)
+    : '';
   const run = async (ov, q) => {
     const box = $('#ls-list', ov);
     box.innerHTML = `<div class="row">${icon('refresh', 'spin')} ${esc(t('searching'))}</div>`;
@@ -1417,33 +1537,54 @@ async function lyricsSearch(x, onPick) {
       if (!results.length) { box.innerHTML = `<p>${esc(t('notFoundMsg'))}</p>`; return; }
       box.innerHTML = results.map((r, i) => {
         const dd = r.duration ? Math.abs(r.duration - x.duration) : null;
-        return `<div class="result" data-i="${i}"><div class="grow"><b>${esc(r.trackName)}</b> — ${esc(r.artistName)}<div class="t-body-s muted">${esc(r.albumName || '')} · ${fmtDur(r.duration)}${dd !== null && dd > 3 ? ` <span class="tag warn">Δ ${Math.round(dd)} s</span>` : ''}</div></div>
-          ${r.syncedLyrics ? `<span class="tag ok">${icon('clock')}${esc(t('synced'))}</span>` : r.plainLyrics ? `<span class="tag">${esc(t('plain'))}</span>` : `<span class="tag">${esc(t('instrumentalShort'))}</span>`}</div>`;
+        const meta = [r.albumName, r.duration ? fmtDur(r.duration) : ''].filter(Boolean).map(esc).join(' · ');
+        return `<div class="result" data-i="${i}"><div class="grow"><b>${esc(r.trackName)}</b> — ${esc(r.artistName)}<div class="t-body-s muted">${meta}${dd !== null && dd > 3 ? ` <span class="tag warn">Δ ${Math.round(dd)} s</span>` : ''}</div></div>
+          <span class="tag src">${esc(r.source)}</span><span class="badge-slot">${badge(r)}</span></div>`;
       }).join('');
     } catch (e) { box.innerHTML = `<p>${esc(errMsg(e))}</p>`; }
   };
-  const q0 = [x.tags.artist, x.tags.title].filter(Boolean).join(' ') || x.fileName.replace(/\.[^.]+$/, '');
+  const show = (ov, r) => {
+    picked = r.syncedLyrics || r.plainLyrics || null;
+    const pv = $('#ls-prev', ov);
+    pv.style.display = 'block';
+    pv.textContent = picked || (r.instrumental ? t('instrumental') : t('notFoundMsg'));
+  };
+  const q0 = [x.tags.artist, x.tags.title].filter(Boolean).join(' - ') || x.fileName.replace(/\.[^.]+$/, '');
   const ok = await dialog({
     title: t('lyricsSearch'), wide: true,
-    body: `<div class="search sm" style="max-width:none;margin-bottom:12px">${icon('search')}<input id="ls-q" value="${esc(q0)}"></div><div id="ls-list"></div><div id="ls-prev" class="lyr-prev on-s" style="display:none;margin-top:10px"></div>`,
+    body: `<div class="search sm" style="max-width:none;margin-bottom:12px">${icon('search')}<input id="ls-q" value="${esc(q0)}"></div><p class="t-body-s muted" style="margin:-4px 0 10px">${esc(t('lyricsSearchHint'))}</p><div id="ls-list"></div><div id="ls-prev" class="lyr-prev on-s" style="display:none;margin-top:10px"></div>`,
     buttons: [{ label: t('cancel'), value: false }, { label: t('useLyrics'), cls: 'filled', run: () => (picked ? true : (snack(t('pickResult')), false)) }],
     onMount: (ov) => {
       const q = $('#ls-q', ov);
       q.onkeydown = (e) => { if (e.key === 'Enter') run(ov, q.value); };
-      $('#ls-list', ov).onclick = (e) => {
+      $('#ls-list', ov).onclick = async (e) => {
         const el = e.target.closest('[data-i]');
         if (!el) return;
         const r = results[+el.dataset.i];
-        picked = r.syncedLyrics || r.plainLyrics;
         $$('.result', ov).forEach((y) => y.classList.toggle('on', y === el));
-        const pv = $('#ls-prev', ov);
-        pv.style.display = picked ? 'block' : 'none';
-        pv.textContent = picked || '';
+        picked = null;
+        if (!r.loaded) {
+          const my = ++seq;
+          const pv = $('#ls-prev', ov);
+          pv.style.display = 'block';
+          pv.textContent = t('searching');
+          try { Object.assign(r, await invoke('fetch_lyrics_hit', { source: r.source, reference: r.ref })); } catch (err) { if (my === seq) pv.textContent = errMsg(err); return; }
+          $('.badge-slot', el).innerHTML = badge(r);
+          if (my !== seq) return;
+        }
+        show(ov, r);
       };
       run(ov, q0);
     },
   });
   if (ok && picked) onPick(picked);
+}
+async function mergeLrc(ids) {
+  const list = (ids || S.tracks.map((y) => y.id)).filter((id) => QUICK.lrcOnly(S.byId.get(id) || { missing: [] }));
+  if (!list.length) return snack(t('lrcNone'));
+  const after = { keep: t('lrcKeep'), hide: t('lrcHide'), delete: t('lrcDelete') }[S.settings.lrcAfterMerge || 'hide'];
+  if (!(await confirmBox(t('lrcMerge'), t('lrcMergeQ', { n: list.length, after }), t('lrcMerge')))) return;
+  try { const n = await invoke('merge_lrc_files', { ids: list }); snack(t('lrcMerged', { n })); renderAll(); } catch (e) { snack(errMsg(e), 'bad'); }
 }
 async function batchEdit(ids) {
   const rows = ['artist', 'albumArtist', 'album', 'year', 'genre', 'composer', 'label', 'discTotal', 'trackTotal'];
@@ -1724,6 +1865,7 @@ document.addEventListener('click', async (e) => {
     case 'reveal': return opener()?.revealItemInDir(x.path).catch((err) => snack(errMsg(err), 'bad'));
     case 'open-mb': return opener()?.openUrl(`https://musicbrainz.org/recording/${x.tags.mbRecordingId}`);
     case 'reload-track': { const nt = await invoke('reload_track', { id: x.id }); upsert(nt); renderSheet(); paintRows(); return; }
+    case 'merge-lrc': return mergeLrc();
     case 'rv-accept': return reviewDecide('accept');
     case 'rv-reject': return reviewDecide('reject');
     case 'rv-skip': return reviewDecide('skip');

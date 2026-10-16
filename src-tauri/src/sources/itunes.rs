@@ -58,6 +58,11 @@ pub async fn search(term: &str, country: &str) -> Result<Vec<Candidate>, HttpErr
 
 /// Wyszukiwanie albumów – do ręcznego wyboru okładki.
 pub async fn search_albums(term: &str, country: &str) -> Result<Vec<crate::models::CoverCandidate>, HttpError> {
+    Ok(album_covers(term, country).await?.into_iter().map(|(_, _, c)| c).collect())
+}
+
+/// Albumy z okładkami: (wykonawca, tytuł albumu, okładka).
+pub async fn album_covers(term: &str, country: &str) -> Result<Vec<(String, String, crate::models::CoverCandidate)>, HttpError> {
     let url = format!(
         "https://itunes.apple.com/search?term={}&media=music&entity=album&limit=12&country={}",
         urlencoding::encode(term),
@@ -70,17 +75,16 @@ pub async fn search_albums(term: &str, country: &str) -> Result<Vec<crate::model
             a.iter()
                 .filter_map(|r| {
                     let art = s(r, "artworkUrl100")?;
-                    Some(crate::models::CoverCandidate {
+                    let artist = s(r, "artistName").unwrap_or_default();
+                    let album = clean_album(&s(r, "collectionName").unwrap_or_default());
+                    let c = crate::models::CoverCandidate {
                         url: art.replace("100x100bb", "1400x1400bb"),
                         thumb: art.replace("100x100bb", "300x300bb"),
-                        source: format!(
-                            "iTunes · {} – {}",
-                            s(r, "artistName").unwrap_or_default(),
-                            clean_album(&s(r, "collectionName").unwrap_or_default())
-                        ),
+                        source: format!("iTunes · {artist} – {album}"),
                         width: 1400,
                         height: 1400,
-                    })
+                    };
+                    Some((artist, album, c))
                 })
                 .collect()
         })

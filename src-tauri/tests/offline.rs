@@ -47,6 +47,8 @@ fn write_read_undo_all_formats() {
         make(&dir, "c.m4a", &["-ar", "22050", "-c:a", "aac", "-b:a", "32k"]),
         make(&dir, "d.ogg", &["-ar", "22050", "-c:a", "libvorbis"]),
         make(&dir, "e.opus", &["-ar", "24000", "-c:a", "libopus", "-b:a", "24k"]),
+        make(&dir, "f.wav", &["-ar", "22050"]),
+        make(&dir, "g.aiff", &["-ar", "22050"]),
     ];
     let hist = History::open(&dir.join("data"));
     let (cover, _, _) = tags::process_cover(&png_bytes(1600, 1600), 1200, 90).unwrap();
@@ -187,4 +189,47 @@ fn lrc_header_and_changes() {
     let ch = music_tagger_lib::engine::build_changes(&old, &new, &settings);
     let fields: Vec<&str> = ch.iter().map(|c| c.field.as_str()).collect();
     assert_eq!(fields, vec!["title", "artist", "album"]);
+}
+
+/// WAV z istniejącym blokiem RIFF INFO (np. z Eksploratora Windows) – po zapisie oba bloki mają nowe dane.
+#[test]
+fn wav_with_riff_info() {
+    if !ffmpeg_available() {
+        return;
+    }
+    let dir = tmpdir("wav");
+    let f = make(&dir, "x.wav", &["-ar", "22050", "-metadata", "title=Stary tytuł", "-metadata", "artist=Stary wykonawca"]);
+    let before = tags::read_track(&f);
+    assert_eq!(before.tags.title.as_deref(), Some("Stary tytuł"));
+    let hist = History::open(&dir.join("data"));
+    hist.record("w1", &f, "tag", vec!["title".into()]).expect("snapshot");
+    let (cover, _, _) = tags::process_cover(&png_bytes(600, 600), 1200, 90).unwrap();
+    let req = tags::WriteRequest {
+        fields: vec![("title".into(), Some("Nowy tytuł – żółć".into())), ("album".into(), Some("Album".into()))],
+        cover: Some(cover),
+        lyrics: Some(Some(LRC.into())),
+        ..Default::default()
+    };
+    tags::write(&f, &req).unwrap();
+    let after = tags::read_track(&f);
+    assert!(after.error.is_none(), "{:?}", after.error);
+    assert_eq!(after.tags.title.as_deref(), Some("Nowy tytuł – żółć"));
+    assert_eq!(after.tags.artist.as_deref(), Some("Stary wykonawca"));
+    assert!(after.cover.is_some() && after.lyrics_synced);
+    assert!(after.duration > 7.0);
+    use lofty::prelude::*;
+    let file = lofty::read_from_path(&f).unwrap();
+    let info = file.tag(lofty::tag::TagType::RiffInfo).expect("RIFF INFO");
+    assert_eq!(info.title().as_deref(), Some("Nowy tytuł – żółć"));
+    assert_eq!(info.album().as_deref(), Some("Album"));
+    // Ponowny zapis nie psuje pliku.
+    tags::write(&f, &tags::WriteRequest { fields: vec![("title".into(), Some("Trzeci".into()))], ..Default::default() }).unwrap();
+    assert_eq!(tags::read_track(&f).tags.title.as_deref(), Some("Trzeci"));
+    // Cofnięcie przywraca dane z RIFF INFO sprzed zmian.
+    hist.undo(&["w1".into()]).unwrap();
+    let back = tags::read_track(&f);
+    assert_eq!(back.tags.title.as_deref(), Some("Stary tytuł"));
+    assert_eq!(back.tags.album, None);
+    assert!(back.cover.is_none());
+    let _ = std::fs::remove_dir_all(&dir);
 }
