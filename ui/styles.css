@@ -374,13 +374,85 @@ a { color: var(--primary); }
 /* Pusty stan */
 .empty {
   flex: 1; display: flex; flex-direction: column; align-items: center;
-  justify-content: safe center; gap: 12px; text-align: center; padding: 24px 16px 100px;
+  justify-content: safe center; gap: 16px; text-align: center; padding: 24px 16px 100px;
   overflow: auto;
 }
 .empty h2 { margin: 0; font-size: 22px; line-height: 28px; font-weight: 400; }
 .empty p { margin: 0; color: var(--on-surface-var); max-width: 480px; line-height: 1.5; }
 .empty .ic.xl { color: var(--on-surface-var); }
 .hero-logo { width: 72px; height: 72px; }
+
+/* Desktop: znacznie lepszy welcome screen */
+@media (min-width: 900px) {
+  .empty { gap: 24px; padding: 48px 32px 120px; }
+  .empty h2 { font-size: 32px; line-height: 40px; }
+  .empty p { font-size: 15px; max-width: 600px; }
+  .hero-logo { width: 96px; height: 96px; }
+
+  .welcome-actions {
+    grid-template-columns: repeat(2, 1fr); gap: 16px;
+    max-width: 640px;
+  }
+  .welcome-card {
+    padding: 28px 24px; min-height: 120px;
+  }
+  .welcome-card .ic.xl { width: 40px; height: 40px; }
+  .welcome-card .title { font-size: 18px; margin-bottom: 6px; }
+  .welcome-card .desc { font-size: 14px; }
+
+  .recent-list { max-width: 720px; margin-top: 32px; }
+  .recent-list h3 { font-size: 14px; margin-bottom: 16px; }
+  .recent-item { padding: 16px 20px; }
+  .recent-item .name { font-size: 15px; }
+  .recent-item .path { font-size: 13px; }
+
+  .toggle-row { max-width: 640px; margin-top: 24px; padding: 16px 0; }
+  .toggle-row span { font-size: 15px; }
+}
+
+/* Welcome screen - lepszy layout na desktop */
+.welcome-actions {
+  display: grid; grid-template-columns: 1fr; gap: 12px; width: 100%;
+  max-width: 420px; margin-top: 8px;
+}
+.welcome-card {
+  padding: 20px; border-radius: var(--r-lg); background: var(--surface-low);
+  cursor: pointer; transition: all .2s; border: 2px solid transparent;
+  text-align: left; min-height: 88px; display: flex; align-items: center; gap: 16px;
+}
+.welcome-card:hover {
+  background: var(--surface-high); transform: translateY(-2px); box-shadow: var(--shadow2);
+  border-color: var(--outline-var);
+}
+.welcome-card .ic { color: var(--primary); flex: none; }
+.welcome-card .content { flex: 1; min-width: 0; }
+.welcome-card .title { font-size: 16px; font-weight: 500; margin-bottom: 4px; color: var(--on-surface); }
+.welcome-card .desc { font-size: 13px; color: var(--on-surface-var); line-height: 1.4; }
+
+.recent-list {
+  width: 100%; max-width: 520px; margin-top: 24px;
+}
+.recent-list h3 {
+  margin: 0 0 12px; font-size: 13px; font-weight: 500; letter-spacing: .1px;
+  color: var(--on-surface-var); text-align: left; padding: 0 4px;
+}
+.recent-item {
+  display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+  border-radius: var(--r-md); cursor: pointer; background: var(--surface-low);
+  margin-bottom: 8px; transition: background .15s;
+}
+.recent-item:hover { background: var(--surface-high); }
+.recent-item .ic { color: var(--on-surface-var); flex: none; }
+.recent-item .txt { flex: 1; min-width: 0; }
+.recent-item .name { font-size: 14px; font-weight: 500; }
+.recent-item .path { font-size: 12px; color: var(--on-surface-var); font-family: var(--mono); }
+
+.toggle-row {
+  display: flex; align-items: center; gap: 10px; padding: 12px 0; cursor: pointer;
+  max-width: 420px; margin: 16px auto 0;
+}
+.toggle-row .switch { margin-right: 4px; }
+.toggle-row span { font-size: 14px; color: var(--on-surface); }
 
 /* ───────────── Dock & Jobs ───────────── */
 #dock {
@@ -495,35 +567,78 @@ body.has-jobs .list-scroll, body.has-jobs .albums { padding-bottom: 180px; }
 }
 
 @media (min-width: 900px) {
-  :root { --rail-w: 80px; --sheet-w: 440px; }
+  :root {
+    --rail-w: 88px;
+    --sheet-w: 520px;
+    --row-h: 68px;
+    --nav-h: 72px;
+  }
+
+  body { font-size: 15px; line-height: 22px; }
+
   #app { display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr) auto; height: 100vh; }
 
   /* Side rail zamiast bottom nav */
   #rail {
     display: flex; flex-direction: column; align-items: center; gap: 4px;
-    padding: calc(12px + var(--safe-t)) 0 16px; background: var(--surface);
+    padding: calc(16px + var(--safe-t)) 0 20px; background: var(--surface);
     border-right: 1px solid var(--outline-var);
   }
-  #rail .logo { width: 40px; height: 40px; margin: 4px 0 16px; }
+  #rail .logo { width: 48px; height: 48px; margin: 4px 0 24px; }
   .logo-img { width: 100%; height: 100%; display: block; object-fit: contain; }
 
   .rail-item {
-    display: flex; flex-direction: column; align-items: center; gap: 4px; width: 72px;
-    padding: 0 0 8px; background: none; border: 0; cursor: pointer; color: var(--on-surface-var);
+    display: flex; flex-direction: column; align-items: center; gap: 5px; width: 80px;
+    padding: 0 0 10px; background: none; border: 0; cursor: pointer; color: var(--on-surface-var);
     position: relative;
   }
   .rail-item .pill {
-    width: 56px; height: 32px; border-radius: var(--r-full); display: grid; place-items: center;
+    width: 64px; height: 36px; border-radius: var(--r-full); display: grid; place-items: center;
     transition: background .2s; position: relative;
   }
   .rail-item:hover .pill { background: color-mix(in srgb, var(--on-surface) 8%, transparent); }
   .rail-item.active { color: var(--on-surface); }
   .rail-item.active .pill { background: var(--secondary-c); color: var(--on-secondary-c); }
-  .rail-item .lbl { font-size: 11px; font-weight: 500; letter-spacing: .5px; text-align: center; }
-  .rail-item .badge { position: absolute; top: -2px; left: 34px; }
+  .rail-item .lbl { font-size: 12px; font-weight: 500; letter-spacing: .4px; text-align: center; }
+  .rail-item .badge { position: absolute; top: -2px; left: 38px; }
 
   #navbar { display: none; } /* Hide bottom nav */
   #main { grid-column: 2; grid-row: 1; }
+
+  /* Topbar desktop */
+  #topbar { padding: calc(12px + var(--safe-t)) 24px 12px 28px; height: var(--nav-h); }
+  #topbar .title h1 { font-size: 24px; line-height: 32px; }
+  #topbar .title .sub { font-size: 13px; line-height: 18px; }
+
+  /* Desktop welcome screen - piękny, przestronny */
+  .empty { gap: 28px; padding: 64px 40px 140px; }
+  .empty h2 { font-size: 36px; line-height: 44px; font-weight: 300; }
+  .empty p { font-size: 16px; line-height: 24px; max-width: 640px; }
+  .hero-logo { width: 112px; height: 112px; }
+
+  .welcome-actions {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;
+    max-width: 720px; width: 100%;
+  }
+  .welcome-card {
+    padding: 32px 28px; min-height: 140px; flex-direction: column; align-items: flex-start;
+    text-align: left; gap: 16px;
+  }
+  .welcome-card:hover {
+    transform: translateY(-4px); box-shadow: var(--shadow3);
+  }
+  .welcome-card .ic { width: 44px; height: 44px; }
+  .welcome-card .title { font-size: 20px; line-height: 28px; margin-bottom: 0; }
+  .welcome-card .desc { font-size: 15px; line-height: 22px; }
+
+  .recent-list { max-width: 760px; margin-top: 40px; }
+  .recent-list h3 { font-size: 15px; margin-bottom: 18px; letter-spacing: .2px; }
+  .recent-item { padding: 18px 24px; }
+  .recent-item .name { font-size: 16px; }
+  .recent-item .path { font-size: 13px; }
+
+  .toggle-row { max-width: 720px; margin-top: 28px; padding: 18px 0; }
+  .toggle-row span { font-size: 16px; }
 
   /* Side sheet as sliding panel */
   #sheet {
