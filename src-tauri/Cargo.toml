@@ -1,14 +1,14 @@
 [package]
-name = "music-tagger"
+name = "open-music-tagger"
 version = "1.0.0"
-description = "MusicTagger – inteligentne uzupełnianie tagów, okładek i tekstów (z czasami) dla Twojej muzyki"
-authors = ["MusicTagger"]
+description = "OpenMusicTagger – inteligentne uzupełnianie tagów, okładek i tekstów (z czasami) dla Twojej muzyki"
+authors = ["OpenMusicTagger"]
 license = "MIT"
 edition = "2021"
 rust-version = "1.80"
 
 [lib]
-name = "music_tagger_lib"
+name = "open_music_tagger_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

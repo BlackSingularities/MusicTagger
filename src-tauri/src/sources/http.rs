@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
 pub const USER_AGENT: &str = concat!(
-    "MusicTagger/",
+    "OpenMusicTagger/",
     env!("CARGO_PKG_VERSION"),
     " ( https://github.com/BlackSingularities/MusicTagger )"
 );
@@ -49,35 +49,30 @@ fn interval(service: &str) -> Duration {
 impl Limiter {
     /// Czeka na swoją kolej. Zwraca `false`, jeśli serwis jest chwilowo zablokowany.
     pub async fn acquire(&self, service: &'static str) -> bool {
-        loop {
-            let wait = {
-                let mut st = self.state.lock().await;
-                let now = Instant::now();
-                let entry = st.entry(service).or_insert((now - interval(service), None));
-                if let Some(until) = entry.1 {
-                    if now < until {
-                        return false;
-                    }
-                    entry.1 = None;
+        let wait = {
+            let mut st = self.state.lock().await;
+            let now = Instant::now();
+            let entry = st.entry(service).or_insert((now - interval(service), None));
+            if let Some(until) = entry.1 {
+                if now < until {
+                    return false;
                 }
-                let next = entry.0 + interval(service);
-                if next <= now {
-                    entry.0 = now;
-                    None
-                } else {
-                    // Rezerwujemy slot i czekamy poza blokadą.
-                    entry.0 = next;
-                    Some(next - now)
-                }
-            };
-            match wait {
-                None => return true,
-                Some(d) => {
-                    tokio::time::sleep(d).await;
-                    return true;
-                }
+                entry.1 = None;
             }
+            let next = entry.0 + interval(service);
+            if next <= now {
+                entry.0 = now;
+                None
+            } else {
+                // Rezerwujemy slot i czekamy poza blokadą.
+                entry.0 = next;
+                Some(next - now)
+            }
+        };
+        if let Some(d) = wait {
+            tokio::time::sleep(d).await;
         }
+        true
     }
 
     pub async fn block(&self, service: &'static str, dur: Duration) {

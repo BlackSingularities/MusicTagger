@@ -1,5 +1,5 @@
 //! Test end-to-end silnika: `cargo run --example e2e -- <folder> [--apply] [--dump plik.json]`
-use music_tagger_lib::{engine, history::History, models::*, ops, settings::Settings, tags};
+use open_music_tagger_lib::{engine, history::History, models::*, ops, settings::Settings, tags};
 use std::path::PathBuf;
 
 #[tokio::main]
@@ -8,8 +8,7 @@ async fn main() {
     let dir = PathBuf::from(args.get(1).expect("folder"));
     let apply = args.iter().any(|a| a == "--apply");
     let dump = args.iter().position(|a| a == "--dump").and_then(|i| args.get(i + 1)).cloned();
-    let mut settings = Settings::default();
-    settings.acoustid_key = std::env::var("ACOUSTID_KEY").unwrap_or_default();
+    let settings = Settings { acoustid_key: std::env::var("ACOUSTID_KEY").unwrap_or_default(), ..Default::default() };
     let hist = History::open(&std::env::temp_dir().join("mt-e2e"));
     let mut out: Vec<TrackEvent> = vec![];
     for e in walkdir::WalkDir::new(&dir).into_iter().flatten() {

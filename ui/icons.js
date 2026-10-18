@@ -63,8 +63,4 @@ export function icon(name, cls = '') {
   return `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || P.info}</svg>`;
 }
 
-let logoN = 0;
-export const logo = () => {
-  const id = 'lg' + ++logoN;
-  return `<svg viewBox="0 0 1024 1024" class="logo" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset=".55" stop-color="#6d28d9"/><stop offset="1" stop-color="#db2777"/></linearGradient></defs><rect x="32" y="32" width="960" height="960" rx="220" fill="url(#${id})"/><circle cx="470" cy="540" r="300" fill="#13111d"/><circle cx="470" cy="540" r="96" fill="#f472b6"/><circle cx="470" cy="540" r="26" fill="#13111d"/><path d="M640 170 L860 170 Q900 170 900 210 L900 390 Q900 420 878 440 L700 610 Q676 632 652 608 L560 516 Q538 494 560 470 L620 410 L620 190 Q620 170 640 170 Z" fill="#fff"/><circle cx="820" cy="250" r="36" fill="#7c3aed"/></svg>`;
-};
+export const logo = () => '<img class="logo-img" src="assets/openmusictagger-icon.png" alt="" aria-hidden="true">';

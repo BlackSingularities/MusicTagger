@@ -76,7 +76,7 @@ pub fn write_text_file(path: &Path, text: &str, hide: bool) -> std::io::Result<(
         let existing = std::fs::metadata(path).map(|m| m.file_attributes() & (HIDDEN | SYSTEM)).unwrap_or(0);
         let attrs = existing | if hide { HIDDEN } else { 0 };
         let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).attributes(attrs).open(path)?;
-        return f.write_all(text.as_bytes());
+        f.write_all(text.as_bytes())
     }
     #[cfg(not(windows))]
     {

@@ -1,7 +1,7 @@
 //! Testy zapisu/odczytu na prawdziwych plikach audio (bez sieci).
 //! Pliki testowe generowane są przez ffmpeg – test jest pomijany, gdy go brak.
 
-use music_tagger_lib::{history::History, models::*, ops, tags};
+use open_music_tagger_lib::{history::History, models::*, ops, tags};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -178,15 +178,15 @@ fn lrc_header_and_changes() {
     assert!(s.starts_with("[ar:A]\n[ti:T]\n"));
     assert!(s.contains("[length:02:05]"));
 
-    let mut settings = music_tagger_lib::settings::Settings::default();
+    let mut settings = open_music_tagger_lib::settings::Settings::default();
     let old = TagFields { title: Some("Track 07".into()), artist: Some("Adele".into()), year: Some("2015".into()), ..Default::default() };
     let new = TagFields { title: Some("Hello".into()), artist: Some("ADELE".into()), album: Some("25".into()), year: Some("2015-10-23".into()), ..Default::default() };
-    let ch = music_tagger_lib::engine::build_changes(&old, &new, &settings);
+    let ch = open_music_tagger_lib::engine::build_changes(&old, &new, &settings);
     let fields: Vec<&str> = ch.iter().map(|c| c.field.as_str()).collect();
     // „Track 07” to śmieciowy tytuł – zastępowany nawet w trybie „tylko brakujące”.
     assert_eq!(fields, vec!["title", "album"]);
     settings.write_mode = "overwrite".into();
-    let ch = music_tagger_lib::engine::build_changes(&old, &new, &settings);
+    let ch = open_music_tagger_lib::engine::build_changes(&old, &new, &settings);
     let fields: Vec<&str> = ch.iter().map(|c| c.field.as_str()).collect();
     assert_eq!(fields, vec!["title", "artist", "album"]);
 }

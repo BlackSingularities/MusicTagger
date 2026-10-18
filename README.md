@@ -1,4 +1,4 @@
-# MusicTagger
+# OpenMusicTagger
 
 Aplikacja na **Windows** i **Androida** (Rust + Tauri 2), która skanuje folder z muzyką i automatycznie uzupełnia:
 
@@ -56,10 +56,10 @@ Każdy push buduje aplikację automatycznie (GitHub Actions → **Releases**):
 
 | Plik | Platforma |
 |---|---|
-| `MusicTagger_x.y.z_x64-setup.exe` | Windows 10/11, instalator |
-| `MusicTagger_x.y.z_x64.msi` | Windows, MSI |
-| `MusicTagger_x.y.z_portable.exe` | Windows, bez instalacji |
-| `MusicTagger_x.y.z.apk` | Android 8.0+ |
+| `OpenMusicTagger_x.y.z_x64-setup.exe` | Windows 10/11, instalator |
+| `OpenMusicTagger_x.y.z_x64.msi` | Windows, MSI |
+| `OpenMusicTagger_x.y.z_portable.exe` | Windows, bez instalacji |
+| `OpenMusicTagger_x.y.z.apk` | Android 8.0+ |
 
 Push na `main` publikuje wydanie „Latest”. Push na inną gałąź publikuje wydanie testowe (pre-release).
 

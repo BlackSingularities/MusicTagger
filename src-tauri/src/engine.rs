@@ -844,7 +844,7 @@ mod tests {
     fn prefers_original_studio_album() {
         let settings = Settings::default();
         let q = Query { title: Some("Bohemian Rhapsody".into()), artist: Some("Queen".into()), duration: 355.0, ..Default::default() };
-        let list = vec![
+        let list = [
             cand("Live at Wembley '86", "1992", "Album", &["Live"], "Official", 360.0),
             cand("Greatest Hits", "1981", "Album", &["Compilation"], "Official", 355.0),
             cand("Rock Montreal", "1981", "Album", &["Live"], "Bootleg", 356.0),

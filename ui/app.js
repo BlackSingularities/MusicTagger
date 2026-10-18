@@ -41,7 +41,9 @@ const S = {
   /** Wynik łączony sprzed wyboru innego dopasowania (do przywrócenia). */
   rvOrig: new Map(),
 };
-const isMobile = () => matchMedia('(max-width: 760px)').matches;
+// Układ jednokolumnowy obejmuje także tablety w orientacji pionowej. Dzięki temu
+// panel propozycji i jego akcje nigdy nie wypadają poza prawą krawędź.
+const isMobile = () => matchMedia('(max-width: 900px)').matches;
 const isAndroid = () => S.info.platform === 'android';
 
 function store(k, v) {
@@ -1357,7 +1359,7 @@ function renderSettings(v) {
     <div class="list-card"><h2>${icon('rename')}${esc(t('sRename'))}</h2>
       ${row(t('pattern'), esc(t('patternD')), `<input class="inp mono" data-text="renamePattern" value="${esc(s.renamePattern || '')}">`)}</div>
     <div class="list-card"><h2>${icon('info')}${esc(t('sAbout'))}</h2>
-      ${row('MusicTagger ' + S.info.version + (S.info.installKind === 'portable' ? ` (${t('portable')})` : ''), esc(t('aboutD')), `<button class="btn tonal sm has-ic" id="chk-upd">${icon('update')}${esc(t('checkUpdates'))}</button>`)}
+      ${row('OpenMusicTagger ' + S.info.version + (S.info.installKind === 'portable' ? ` (${t('portable')})` : ''), esc(t('aboutD')), `<button class="btn tonal sm has-ic" id="chk-upd">${icon('update')}${esc(t('checkUpdates'))}</button>`)}
       ${row(t('shortcuts'), esc(t('shortcutsD')), '')}
       ${row(t('dataDir'), `<span class="mono selectable">${esc(S.info.dataDir || '')}</span>`, '')}</div>
   </div></div>`;
@@ -1471,8 +1473,7 @@ function openMenu(anchor) {
 async function analyzeIds(ids) {
   if (!ids.length) return snack(t('allComplete'));
   try {
-    await invoke('analyze_tracks', { ids });
-    S.jobs.analyze = { kind: 'analyze', done: 0, total: ids.length, running: true };
+    S.jobs.analyze = await invoke('analyze_tracks', { ids });
     renderJobs();
   } catch (e) { snack(errMsg(e), 'bad'); }
 }
@@ -1742,7 +1743,7 @@ async function exportReport() {
   let path = '';
   const d = dialogApi();
   if (d && !isAndroid()) {
-    path = await d.save({ defaultPath: 'musictagger-raport.csv', filters: [{ name: 'CSV', extensions: ['csv'] }] });
+    path = await d.save({ defaultPath: 'openmusictagger-raport.csv', filters: [{ name: 'CSV', extensions: ['csv'] }] });
     if (!path) return;
   }
   try { const p = await invoke('write_text_file', { path, content: [head.join(';'), ...rows].join('\r\n') }); snack(t('reportSaved', { p })); } catch (e) { snack(errMsg(e), 'bad'); }

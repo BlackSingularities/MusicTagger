@@ -53,7 +53,7 @@ pub fn lrc_with_header(lrc: &str, f: &TagFields, duration: f64) -> String {
         let d = duration.round() as u64;
         h.push_str(&format!("[length:{:02}:{:02}]\n", d / 60, d % 60));
     }
-    h.push_str("[by:MusicTagger]\n");
+    h.push_str("[by:OpenMusicTagger]\n");
     format!("{h}{}", lrc.trim_start())
 }
 
@@ -133,7 +133,8 @@ pub fn run_blocking<R>(f: impl FnOnce() -> R) -> R {
 }
 
 /// Gotowe (pobrane i przeskalowane) okładki – utwory z jednego albumu nie pobierają jej ponownie.
-static COVER_CACHE: Lazy<Mutex<VecDeque<(String, Vec<u8>)>>> = Lazy::new(|| Mutex::new(VecDeque::new()));
+type CoverCache = VecDeque<(String, Vec<u8>)>;
+static COVER_CACHE: Lazy<Mutex<CoverCache>> = Lazy::new(|| Mutex::new(VecDeque::new()));
 const COVER_CACHE_SIZE: usize = 24;
 
 async fn prepared_cover(p: &Proposal, settings: &Settings) -> Result<Vec<u8>, String> {

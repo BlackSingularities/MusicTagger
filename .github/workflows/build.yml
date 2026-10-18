@@ -8,11 +8,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
+  group: openmusictagger-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -23,6 +23,7 @@ jobs:
   test:
     name: Testy
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Zależności systemowe
@@ -30,11 +31,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev ffmpeg
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
           key: test
-      - name: cargo test
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --locked --all-targets
+      - name: Testy Rust
         working-directory: src-tauri
         run: cargo test --locked
       - name: Sprawdzenie składni interfejsu
@@ -44,11 +50,13 @@ jobs:
     name: Windows (.exe / .msi)
     needs: test
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -63,9 +71,9 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp src-tauri/target/release/bundle/nsis/*-setup.exe "dist/MusicTagger_${APP_VERSION}_x64-setup.exe"
-          cp src-tauri/target/release/bundle/msi/*.msi "dist/MusicTagger_${APP_VERSION}_x64.msi"
-          cp src-tauri/target/release/music-tagger.exe "dist/MusicTagger_${APP_VERSION}_portable.exe"
+          cp src-tauri/target/release/bundle/nsis/*-setup.exe "dist/OpenMusicTagger_${APP_VERSION}_x64-setup.exe"
+          cp src-tauri/target/release/bundle/msi/*.msi "dist/OpenMusicTagger_${APP_VERSION}_x64.msi"
+          cp src-tauri/target/release/open-music-tagger.exe "dist/OpenMusicTagger_${APP_VERSION}_portable.exe"
           ls -la dist
       - uses: actions/upload-artifact@v4
         with:
@@ -76,11 +84,13 @@ jobs:
     name: Android (.apk)
     needs: test
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -121,13 +131,13 @@ jobs:
             KEYSTORE_PASSWORD="musictagger-ci"
             ALIAS="musictagger"
             keytool -genkeypair -v -keystore release.jks -storepass "$KEYSTORE_PASSWORD" -keypass "$KEYSTORE_PASSWORD" \
-              -alias "$ALIAS" -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=MusicTagger, O=BlackSingularities, C=PL"
+              -alias "$ALIAS" -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=OpenMusicTagger, O=BlackSingularities, C=PL"
           fi
           mkdir -p dist
           "$BT/zipalign" -f -p 4 "$UNSIGNED" aligned.apk
           "$BT/apksigner" sign --ks release.jks --ks-pass "pass:$KEYSTORE_PASSWORD" --key-pass "pass:$KEYSTORE_PASSWORD" \
-            --ks-key-alias "$ALIAS" --out "dist/MusicTagger_${APP_VERSION}.apk" aligned.apk
-          "$BT/apksigner" verify --print-certs "dist/MusicTagger_${APP_VERSION}.apk" | head -3
+            --ks-key-alias "$ALIAS" --out "dist/OpenMusicTagger_${APP_VERSION}.apk" aligned.apk
+          "$BT/apksigner" verify --print-certs "dist/OpenMusicTagger_${APP_VERSION}.apk" | head -3
           rm -f release.jks
           ls -la dist
       - uses: actions/upload-artifact@v4
@@ -140,6 +150,9 @@ jobs:
     needs: [windows, android]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -148,22 +161,22 @@ jobs:
       - name: Opis wydania
         run: |
           {
-            echo "## MusicTagger ${APP_VERSION}"
+            echo "## OpenMusicTagger ${APP_VERSION}"
             echo
             echo "Gałąź: \`${GITHUB_REF_NAME}\` · commit ${GITHUB_SHA::7}"
             echo
             echo "| Plik | Do czego |"
             echo "|---|---|"
-            echo "| \`MusicTagger_${APP_VERSION}_x64-setup.exe\` | Windows – instalator (zalecany) |"
-            echo "| \`MusicTagger_${APP_VERSION}_x64.msi\` | Windows – instalator MSI |"
-            echo "| \`MusicTagger_${APP_VERSION}_portable.exe\` | Windows – wersja bez instalacji (wymaga WebView2) |"
-            echo "| \`MusicTagger_${APP_VERSION}.apk\` | Android 8.0+ |"
+            echo "| \`OpenMusicTagger_${APP_VERSION}_x64-setup.exe\` | Windows – instalator (zalecany) |"
+            echo "| \`OpenMusicTagger_${APP_VERSION}_x64.msi\` | Windows – instalator MSI |"
+            echo "| \`OpenMusicTagger_${APP_VERSION}_portable.exe\` | Windows – wersja bez instalacji (wymaga WebView2) |"
+            echo "| \`OpenMusicTagger_${APP_VERSION}.apk\` | Android 8.0+ |"
           } > notes.md
           cat notes.md
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.APP_VERSION }}
-          name: MusicTagger ${{ env.APP_VERSION }}${{ (github.ref_name != 'main' && github.ref_name != 'master' && !startsWith(github.ref, 'refs/tags/')) && format(' ({0})', github.ref_name) || '' }}
+          name: OpenMusicTagger ${{ env.APP_VERSION }}${{ (github.ref_name != 'main' && github.ref_name != 'master' && !startsWith(github.ref, 'refs/tags/')) && format(' ({0})', github.ref_name) || '' }}
           body_path: notes.md
           target_commitish: ${{ github.sha }}
           prerelease: ${{ github.ref_name != 'main' && github.ref_name != 'master' && !startsWith(github.ref, 'refs/tags/') }}

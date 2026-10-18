@@ -14,7 +14,7 @@ use history::History;
 use models::*;
 use serde::Serialize;
 use settings::Settings;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -27,14 +27,28 @@ pub struct AppState {
     settings: RwLock<Settings>,
     data_dir: PathBuf,
     history: History,
-    cancel: AtomicBool,
-    busy: AtomicBool,
+    scan_cancel: AtomicBool,
+    analyze_cancel: AtomicBool,
+    apply_cancel: AtomicBool,
     thumbs: Mutex<HashMap<String, String>>,
-    apply_queue: Mutex<std::collections::VecDeque<String>>,
+    /// Jedna kolejka analizy przyjmuje kolejne żądania także wtedy, gdy poprzednia
+    /// paczka nadal działa. `analyze_pending` zapobiega analizowaniu tego samego
+    /// pliku dwa razy jednocześnie.
+    analyze_queue: Mutex<VecDeque<String>>,
+    analyze_pending: Mutex<HashSet<String>>,
+    analyze_running: AtomicBool,
+    analyze_total: AtomicUsize,
+    analyze_done: AtomicUsize,
+    analyze_errors: AtomicUsize,
+    apply_queue: Mutex<VecDeque<String>>,
+    apply_pending: Mutex<HashSet<String>>,
     apply_running: AtomicBool,
     apply_total: AtomicUsize,
     apply_done: AtomicUsize,
     apply_errors: AtomicUsize,
+    /// Operacje dotyczące tego samego pliku są wykonywane kolejno. Różne pliki
+    /// nadal mogą być analizowane i zapisywane równolegle.
+    file_locks: tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// Pamięć podręczna odczytanych tagów (ścieżka → rozmiar, czas modyfikacji w ms, utwór).
     read_cache: Mutex<Option<HashMap<String, CachedTrack>>>,
 }
@@ -84,6 +98,21 @@ impl AppState {
         self.thumbs.lock().unwrap().remove(old_id);
         self.put(t);
     }
+}
+
+fn file_lock_key(path: &str) -> String {
+    if cfg!(windows) { path.replace('/', "\\").to_lowercase() } else { path.to_string() }
+}
+
+async fn lock_track_file(state: &AppState, path: &str) -> tokio::sync::OwnedMutexGuard<()> {
+    let lock = {
+        let mut locks = state.file_locks.lock().await;
+        locks
+            .entry(file_lock_key(path))
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    };
+    lock.lock_owned().await
 }
 
 #[derive(Serialize, Clone)]
@@ -323,7 +352,7 @@ async fn load_files(app: AppHandle, state: Arc<AppState>, files: Vec<PathBuf>, a
         std::thread::scope(|s| {
             for _ in 0..workers {
                 s.spawn(|| loop {
-                    if st2.cancel.load(Ordering::SeqCst) {
+                    if st2.scan_cancel.load(Ordering::SeqCst) {
                         break;
                     }
                     let i = next.fetch_add(1, Ordering::SeqCst);
@@ -438,7 +467,7 @@ async fn scan_folder(
         s.recursive = recursive;
         let _ = s.save(&state.data_dir);
     }
-    state.cancel.store(false, Ordering::SeqCst);
+    state.scan_cancel.store(false, Ordering::SeqCst);
     let _ = app.emit("scan-progress", ScanProgress { done: 0, total: 0, current: path.clone(), phase: "collect".into() });
     let files = tauri::async_runtime::spawn_blocking(move || {
         walkdir::WalkDir::new(&root)
@@ -460,7 +489,7 @@ async fn scan_folder(
 #[tauri::command]
 async fn scan_files(app: AppHandle, state: St<'_>, paths: Vec<String>, append: Option<bool>) -> Result<Vec<Track>, String> {
     let state = state.inner().clone();
-    state.cancel.store(false, Ordering::SeqCst);
+    state.scan_cancel.store(false, Ordering::SeqCst);
     let files: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).filter(|p| p.is_file() && tags::is_audio(p)).collect();
     if files.is_empty() {
         return Err("Nie wybrano obsługiwanych plików audio".into());
@@ -469,7 +498,10 @@ async fn scan_files(app: AppHandle, state: St<'_>, paths: Vec<String>, append: O
 }
 
 #[tauri::command]
-fn reload_track(state: St, id: String) -> Result<Track, String> {
+async fn reload_track(state: St<'_>, id: String) -> Result<Track, String> {
+    let state = state.inner().clone();
+    let initial = state.track(&id)?;
+    let _file_guard = lock_track_file(&state, &initial.path).await;
     let t = state.track(&id)?;
     let mut n = tags::read_track(Path::new(&t.path));
     tags::evaluate(&mut n, state.settings().min_cover_size);
@@ -520,14 +552,6 @@ fn export_cover(state: St, id: String, dest: String) -> Result<(), String> {
 
 // ───────────────────────────── Analiza (automatyczne tagowanie) ─────────────────────────────
 
-fn job_guard(state: &AppState) -> Result<(), String> {
-    if state.busy.swap(true, Ordering::SeqCst) {
-        return Err("Trwa już inne zadanie – poczekaj lub je zatrzymaj".into());
-    }
-    state.cancel.store(false, Ordering::SeqCst);
-    Ok(())
-}
-
 /// Uruchamia operację z limitem czasu i ochroną przed paniką – błąd jednego dostawcy danych
 /// albo nietypowego pliku kończy się komunikatem przy tym utworze, a kolejka idzie dalej.
 async fn guarded<T>(secs: u64, what: &str, fut: impl std::future::Future<Output = Result<T, String>>) -> Result<T, String> {
@@ -549,6 +573,10 @@ fn has_work(p: &Proposal) -> bool {
 
 async fn analyze_one(app: &AppHandle, state: &Arc<AppState>, id: &str, manual: Option<(String, Option<String>)>) -> Result<(), String> {
     let settings = state.settings();
+    let initial = state.track(id)?;
+    let _file_guard = lock_track_file(state, &initial.path).await;
+    // Plik mógł zostać zapisany, kiedy analiza czekała w kolejce. Pobieramy
+    // najnowszy model dopiero po wejściu do sekcji krytycznej.
     let Some(t) = state.set_status(id, TrackStatus::Working) else { return Ok(()) };
     emit_track(app, &t, None);
     let res = match guarded(240, "Analiza", async { Ok(engine::analyze(&t, &settings, manual.clone()).await) }).await {
@@ -607,52 +635,91 @@ async fn analyze_one(app: &AppHandle, state: &Arc<AppState>, id: &str, manual: O
 }
 
 #[tauri::command]
-async fn analyze_tracks(app: AppHandle, state: St<'_>, ids: Vec<String>) -> Result<(), String> {
+async fn analyze_tracks(app: AppHandle, state: St<'_>, ids: Vec<String>) -> Result<JobProgress, String> {
     let state = state.inner().clone();
-    job_guard(&state)?;
-    let total = ids.len();
-    for id in &ids {
-        if let Some(t) = state.set_status(id, TrackStatus::Queued) {
-            emit_track(&app, &t, None);
+    let added = {
+        let mut pending = state.analyze_pending.lock().unwrap();
+        let mut queue = state.analyze_queue.lock().unwrap();
+        let mut added = 0;
+        for id in ids {
+            if state.tracks.lock().unwrap().contains_key(&id) && pending.insert(id.clone()) {
+                if added == 0 { state.analyze_cancel.store(false, Ordering::SeqCst); }
+                queue.push_back(id.clone());
+                added += 1;
+                if let Some(t) = state.set_status(&id, TrackStatus::Queued) { emit_track(&app, &t, None); }
+            }
+        }
+        state.analyze_total.fetch_add(added, Ordering::SeqCst);
+        added
+    };
+    if added > 0 && !state.analyze_running.swap(true, Ordering::SeqCst) {
+        tauri::async_runtime::spawn(analyze_worker(app, state));
+        return Ok(JobProgress { kind: "analyze".into(), done: 0, total: added, running: true, errors: 0 });
+    }
+    Ok(JobProgress {
+        kind: "analyze".into(),
+        done: state.analyze_done.load(Ordering::SeqCst),
+        total: state.analyze_total.load(Ordering::SeqCst),
+        running: state.analyze_running.load(Ordering::SeqCst),
+        errors: state.analyze_errors.load(Ordering::SeqCst),
+    })
+}
+
+async fn analyze_worker(app: AppHandle, state: Arc<AppState>) {
+    let progress = |running: bool| {
+        let _ = app.emit("job-progress", JobProgress {
+            kind: "analyze".into(),
+            done: state.analyze_done.load(Ordering::SeqCst),
+            total: state.analyze_total.load(Ordering::SeqCst),
+            running,
+            errors: state.analyze_errors.load(Ordering::SeqCst),
+        });
+    };
+    progress(true);
+    let mut running = futures::stream::FuturesUnordered::new();
+    let mut last_emit = std::time::Instant::now();
+    loop {
+        let parallel = state.settings().concurrency.clamp(1, settings::MAX_CONCURRENCY);
+        while running.len() < parallel {
+            let id = state.analyze_queue.lock().unwrap().pop_front();
+            let Some(id) = id else { break };
+            let app = app.clone();
+            let state = state.clone();
+            running.push(async move {
+                if state.analyze_cancel.load(Ordering::SeqCst) {
+                    if let Some(t) = state.set_status(&id, TrackStatus::Idle) { emit_track(&app, &t, None); }
+                } else if analyze_one(&app, &state, &id, None).await.is_err() {
+                    state.analyze_errors.fetch_add(1, Ordering::SeqCst);
+                }
+                state.analyze_pending.lock().unwrap().remove(&id);
+                state.analyze_done.fetch_add(1, Ordering::SeqCst);
+            });
+        }
+        if running.next().await.is_none() {
+            // Zmiana flagi pod blokadą kolejki zamyka wyścig z dokładaniem pracy.
+            let queue = state.analyze_queue.lock().unwrap();
+            if queue.is_empty() {
+                state.analyze_running.store(false, Ordering::SeqCst);
+                progress(false);
+                state.analyze_total.store(0, Ordering::SeqCst);
+                state.analyze_done.store(0, Ordering::SeqCst);
+                state.analyze_errors.store(0, Ordering::SeqCst);
+                drop(queue);
+                return;
+            }
+        }
+        if last_emit.elapsed() > std::time::Duration::from_millis(150) {
+            progress(true);
+            last_emit = std::time::Instant::now();
         }
     }
-    let concurrency = state.settings().concurrency;
-    tauri::async_runtime::spawn(async move {
-        let done = AtomicUsize::new(0);
-        let errors = AtomicUsize::new(0);
-        let progress = |d: usize, e: usize, running: bool| {
-            let _ = app.emit("job-progress", JobProgress { kind: "analyze".into(), done: d, total, running, errors: e });
-        };
-        progress(0, 0, true);
-        futures::stream::iter(ids.iter())
-            .for_each_concurrent(concurrency, |id| {
-                let app = app.clone();
-                let state = state.clone();
-                let done = &done;
-                let errors = &errors;
-                let progress = &progress;
-                async move {
-                    if state.cancel.load(Ordering::SeqCst) {
-                        if let Some(t) = state.set_status(id, TrackStatus::Idle) {
-                            emit_track(&app, &t, None);
-                        }
-                    } else if analyze_one(&app, &state, id, None).await.is_err() {
-                        errors.fetch_add(1, Ordering::SeqCst);
-                    }
-                    let d = done.fetch_add(1, Ordering::SeqCst) + 1;
-                    progress(d, errors.load(Ordering::SeqCst), true);
-                }
-            })
-            .await;
-        state.busy.store(false, Ordering::SeqCst);
-        progress(total, errors.load(Ordering::SeqCst), false);
-    });
-    Ok(())
 }
 
 #[tauri::command]
 fn cancel_job(state: St) {
-    state.cancel.store(true, Ordering::SeqCst);
+    state.scan_cancel.store(true, Ordering::SeqCst);
+    state.analyze_cancel.store(true, Ordering::SeqCst);
+    state.apply_cancel.store(true, Ordering::SeqCst);
 }
 
 #[tauri::command]
@@ -700,9 +767,10 @@ async fn apply_proposals(app: AppHandle, state: St<'_>, ids: Vec<String>) -> Res
     let state = state.inner().clone();
     let added = {
         let mut q = state.apply_queue.lock().unwrap();
+        let mut pending = state.apply_pending.lock().unwrap();
         let mut n = 0;
         for id in ids {
-            if !q.contains(&id) && state.proposals.lock().unwrap().contains_key(&id) {
+            if state.proposals.lock().unwrap().contains_key(&id) && pending.insert(id.clone()) {
                 q.push_back(id.clone());
                 n += 1;
                 if let Some(t) = state.set_status(&id, TrackStatus::Queued) {
@@ -710,11 +778,19 @@ async fn apply_proposals(app: AppHandle, state: St<'_>, ids: Vec<String>) -> Res
                 }
             }
         }
+        state.apply_total.fetch_add(n, Ordering::SeqCst);
         n
     };
-    state.apply_total.fetch_add(added, Ordering::SeqCst);
+    if added == 0 { return Ok(0); }
+    let _ = app.emit("job-progress", JobProgress {
+        kind: "apply".into(),
+        done: state.apply_done.load(Ordering::SeqCst),
+        total: state.apply_total.load(Ordering::SeqCst),
+        running: true,
+        errors: state.apply_errors.load(Ordering::SeqCst),
+    });
     if !state.apply_running.swap(true, Ordering::SeqCst) {
-        state.cancel.store(false, Ordering::SeqCst);
+        state.apply_cancel.store(false, Ordering::SeqCst);
         tauri::async_runtime::spawn(apply_worker(app, state));
     }
     Ok(added)
@@ -739,8 +815,9 @@ async fn apply_worker(app: AppHandle, state: Arc<AppState>) {
     // (wcześniej cała paczka czekała na najwolniejszy plik).
     let next_id = |state: &AppState| -> Option<String> {
         let mut q = state.apply_queue.lock().unwrap();
-        if state.cancel.load(Ordering::SeqCst) {
+        if state.apply_cancel.load(Ordering::SeqCst) {
             for id in q.drain(..) {
+                state.apply_pending.lock().unwrap().remove(&id);
                 if let Some(t) = state.set_status(&id, TrackStatus::Proposed) {
                     let p = state.proposals.lock().unwrap().get(&id).cloned();
                     emit_track(&app, &t, p);
@@ -762,8 +839,18 @@ async fn apply_worker(app: AppHandle, state: Arc<AppState>) {
             let batch = batch.clone();
             let settings = settings.clone();
             running.push(async move {
+                let Ok(initial) = state.track(&id) else {
+                    state.apply_pending.lock().unwrap().remove(&id);
+                    state.apply_done.fetch_add(1, Ordering::SeqCst);
+                    return;
+                };
+                let _file_guard = lock_track_file(&state, &initial.path).await;
                 let p = state.proposals.lock().unwrap().get(&id).cloned();
-                let (Some(p), Ok(t)) = (p, state.track(&id)) else { return };
+                let (Some(p), Ok(t)) = (p, state.track(&id)) else {
+                    state.apply_pending.lock().unwrap().remove(&id);
+                    state.apply_done.fetch_add(1, Ordering::SeqCst);
+                    return;
+                };
                 if let Some(w) = state.set_status(&id, TrackStatus::Working) {
                     emit_track(&app, &w, None);
                 }
@@ -782,26 +869,32 @@ async fn apply_worker(app: AppHandle, state: Arc<AppState>) {
                         emit_track(&app, &nt, Some(p));
                     }
                 }
+                state.apply_pending.lock().unwrap().remove(&id);
                 state.apply_done.fetch_add(1, Ordering::SeqCst);
             });
         }
         if running.next().await.is_none() {
-            break;
+            let queue = state.apply_queue.lock().unwrap();
+            if queue.is_empty() {
+                state.history.flush();
+                state.apply_running.store(false, Ordering::SeqCst);
+                progress(false);
+                state.apply_total.store(0, Ordering::SeqCst);
+                state.apply_done.store(0, Ordering::SeqCst);
+                state.apply_errors.store(0, Ordering::SeqCst);
+                drop(queue);
+                return;
+            }
         }
         if last_emit.elapsed() > std::time::Duration::from_millis(150) {
             progress(true);
             last_emit = std::time::Instant::now();
         }
     }
-    state.history.flush();
-    state.apply_running.store(false, Ordering::SeqCst);
-    progress(false);
-    state.apply_total.store(0, Ordering::SeqCst);
-    state.apply_done.store(0, Ordering::SeqCst);
-    state.apply_errors.store(0, Ordering::SeqCst);
 }
 
-static COVER_SIZES: once_cell::sync::Lazy<Mutex<HashMap<String, (u32, u32, usize)>>> =
+type CoverSizeCache = HashMap<String, (u32, u32, usize)>;
+static COVER_SIZES: once_cell::sync::Lazy<Mutex<CoverSizeCache>> =
     once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Serialize)]
@@ -876,6 +969,8 @@ async fn save_edits(app: AppHandle, state: St<'_>, req: EditRequest) -> Result<V
             let req = req.clone();
             let cover = cover.clone();
             async move {
+                let initial = state.track(&id)?;
+                let _file_guard = lock_track_file(&state, &initial.path).await;
                 let t = state.track(&id)?;
                 let res = tauri::async_runtime::spawn_blocking(move || edit_one(&state, &t, &req, cover.as_ref().as_ref(), &settings, &batch))
                     .await
@@ -1019,6 +1114,7 @@ async fn merge_lrc_files(app: AppHandle, state: St<'_>, ids: Vec<String>) -> Res
             let settings = settings.clone();
             let batch = batch.clone();
             async move {
+                let _file_guard = lock_track_file(&state, &t.path).await;
                 tauri::async_runtime::spawn_blocking(move || {
                     ops::merge_lrc(&t, &settings, &state.history, &batch).map_err(|e| format!("{}: {e}", t.file_name)).inspect(|nt| {
                         state.put(nt.clone());
@@ -1084,11 +1180,14 @@ fn rename_preview(state: St, ids: Vec<String>, pattern: String) -> Vec<RenamePre
 }
 
 #[tauri::command]
-fn rename_apply(app: AppHandle, state: St, ids: Vec<String>, pattern: String) -> Result<usize, String> {
+async fn rename_apply(app: AppHandle, state: St<'_>, ids: Vec<String>, pattern: String) -> Result<usize, String> {
+    let state = state.inner().clone();
     let batch = uuid::Uuid::new_v4().to_string();
     let mut n = 0;
     let mut errors = vec![];
     for id in ids {
+        let initial = state.track(&id)?;
+        let _file_guard = lock_track_file(&state, &initial.path).await;
         let t = state.track(&id)?;
         let Some(name) = ops::render_pattern(&pattern, &t) else { continue };
         if name == t.file_name {
@@ -1127,7 +1226,17 @@ fn get_history(state: St) -> Vec<history::Entry> {
 }
 
 #[tauri::command]
-fn undo(app: AppHandle, state: St, ids: Vec<String>) -> Result<usize, String> {
+async fn undo(app: AppHandle, state: St<'_>, ids: Vec<String>) -> Result<usize, String> {
+    let state = state.inner().clone();
+    let mut paths: Vec<String> = state.history.list().into_iter()
+        .filter(|e| !e.undone && (ids.contains(&e.id) || ids.contains(&e.batch)))
+        .flat_map(|e| [e.path, e.old_path.unwrap_or_default()])
+        .filter(|p| !p.is_empty())
+        .collect();
+    paths.sort_by_key(|p| file_lock_key(p));
+    paths.dedup_by(|a, b| file_lock_key(a) == file_lock_key(b));
+    let mut _file_guards = Vec::with_capacity(paths.len());
+    for path in &paths { _file_guards.push(lock_track_file(&state, path).await); }
     let touched = state.history.undo(&ids)?;
     let min_cover = state.settings().min_cover_size;
     for (old, new) in &touched {
@@ -1176,7 +1285,7 @@ fn write_text_file(path: String, content: String) -> Result<String, String> {
         } else {
             std::env::temp_dir()
         };
-        dir.join(format!("musictagger-raport-{}.csv", chrono::Local::now().format("%Y%m%d-%H%M")))
+        dir.join(format!("openmusictagger-raport-{}.csv", chrono::Local::now().format("%Y%m%d-%H%M")))
     } else {
         PathBuf::from(path)
     };
@@ -1188,7 +1297,10 @@ fn write_text_file(path: String, content: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn delete_lrc(state: St, id: String) -> Result<Track, String> {
+async fn delete_lrc(state: St<'_>, id: String) -> Result<Track, String> {
+    let state = state.inner().clone();
+    let initial = state.track(&id)?;
+    let _file_guard = lock_track_file(&state, &initial.path).await;
     let t = state.track(&id)?;
     let _ = std::fs::remove_file(tags::lrc_path(Path::new(&t.path)));
     let _ = std::fs::remove_file(tags::lrc_backup_path(Path::new(&t.path)));
@@ -1205,7 +1317,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             update::cleanup_old();
-            let data_dir = app.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir().join("musictagger"));
+            // Identyfikator pakietu pozostaje zgodny wstecznie, aby aktualizacja nie
+            // utraciła ustawień ani historii użytkownika po zmianie nazwy produktu.
+            let data_dir = app.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir().join("openmusictagger"));
             let _ = std::fs::create_dir_all(&data_dir);
             let settings = Settings::load(&data_dir).sanitized();
             let state = Arc::new(AppState {
@@ -1215,14 +1329,23 @@ pub fn run() {
                 settings: RwLock::new(settings),
                 history: History::open(&data_dir),
                 data_dir,
-                cancel: AtomicBool::new(false),
-                busy: AtomicBool::new(false),
+                scan_cancel: AtomicBool::new(false),
+                analyze_cancel: AtomicBool::new(false),
+                apply_cancel: AtomicBool::new(false),
                 thumbs: Mutex::new(HashMap::new()),
+                analyze_queue: Mutex::new(Default::default()),
+                analyze_pending: Mutex::new(Default::default()),
+                analyze_running: AtomicBool::new(false),
+                analyze_total: AtomicUsize::new(0),
+                analyze_done: AtomicUsize::new(0),
+                analyze_errors: AtomicUsize::new(0),
                 apply_queue: Mutex::new(Default::default()),
+                apply_pending: Mutex::new(Default::default()),
                 apply_running: AtomicBool::new(false),
                 apply_total: AtomicUsize::new(0),
                 apply_done: AtomicUsize::new(0),
                 apply_errors: AtomicUsize::new(0),
+                file_locks: tokio::sync::Mutex::new(HashMap::new()),
                 read_cache: Mutex::new(None),
             });
             app.manage(state);

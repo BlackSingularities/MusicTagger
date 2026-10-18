@@ -1,4 +1,4 @@
-/* MusicTagger – Material Design 3 */
+/* OpenMusicTagger – Material Design 3 */
 
 /* ───────────── Tokeny kolorów (M3) ───────────── */
 :root {
@@ -100,6 +100,7 @@ a { color: var(--primary); }
   padding: calc(12px + var(--safe-t)) 0 16px;
 }
 #rail .logo { width: 40px; height: 40px; margin: 4px 0 20px; }
+.logo-img { width: 100%; height: 100%; display: block; object-fit: contain; filter: drop-shadow(0 4px 12px color-mix(in srgb, var(--primary) 28%, transparent)); }
 .rail-item {
   display: flex; flex-direction: column; align-items: center; gap: 4px; width: 80px; padding: 0 0 8px;
   background: none; border: 0; cursor: pointer; color: var(--on-surface-var); position: relative;
@@ -417,7 +418,7 @@ input[type=range] { accent-color: var(--primary); }
 body.has-jobs .rv-body { padding-bottom: 128px; }
 .rv-actions {
   display: flex; align-items: center; gap: 8px; padding: 12px 24px; padding-bottom: calc(12px + var(--safe-b));
-  background: var(--surface-c); border-top: 1px solid var(--outline-var);
+  background: var(--surface-c); border-top: 1px solid var(--outline-var); flex-wrap: wrap; flex: none;
 }
 .rv-actions .kbd { font-family: var(--mono); font-size: 11px; opacity: .7; margin-left: 2px; }
 .rv-head { display: flex; gap: 20px; align-items: flex-start; margin: 8px 0 20px; }
@@ -622,6 +623,9 @@ body.has-jobs .list-scroll { padding-bottom: 180px; }
   .list-head, .trow { grid-template-columns: 40px 48px minmax(0, 1fr) 104px 90px 112px; }
   .review { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); }
   .rv-body { padding: 8px 20px 24px; }
+  .rv-actions { padding-inline: 12px; gap: 4px; }
+  .rv-actions .kbd, .rv-actions .lbl-m { display: none; }
+  .rv-actions .btn { padding-inline: 14px; }
 }
 @container main (max-width: 700px) {
   .list-head .c-score, .trow .c-score { display: none; }
@@ -631,12 +635,13 @@ body.has-jobs .list-scroll { padding-bottom: 180px; }
 @media (max-width: 1180px) {
   #sheet.open { position: fixed; right: 0; top: 0; bottom: 0; z-index: 50; box-shadow: var(--shadow3); }
 }
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   :root { --row-h: 72px; --sheet-w: 100vw; }
-  #app { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
+  #app { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  #main { grid-column: 1; grid-row: 1; }
   #rail { display: none; }
   #navbar {
-    display: flex; grid-row: 2; background: var(--surface-c); height: calc(80px + var(--safe-b)); padding-bottom: var(--safe-b);
+    display: flex; grid-column: 1; grid-row: 2; position: relative; z-index: 40; background: var(--surface-c); height: calc(80px + var(--safe-b)); padding-bottom: var(--safe-b);
   }
   #navbar .rail-item { flex: 1; width: auto; padding: 12px 0 16px; }
   #navbar .rail-item .pill { width: 64px; }
@@ -668,7 +673,7 @@ body.has-jobs .list-scroll { padding-bottom: 180px; }
   .rv-body { padding: 4px 16px 24px; }
   .rv-actions { padding: 10px 12px; }
   .rv-actions .kbd, .rv-actions .lbl-m { display: none; }
-  .page { padding: 4px 12px 120px; }
+  .page { padding: 12px 12px 120px; }
   .li-row { flex-wrap: wrap; padding: 12px 16px; }
   .li-row .inp, .li-row select.sel, .range-wrap { width: 100%; }
   .overlay { padding: 12px; }

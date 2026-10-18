@@ -20,7 +20,7 @@ pub fn install_kind() -> &'static str {
     }
     let in_program_files = ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"]
         .iter()
-        .filter_map(|k| std::env::var_os(k))
+        .filter_map(std::env::var_os)
         .any(|pf| exe.starts_with(PathBuf::from(pf)));
     if in_program_files {
         "installed"
@@ -41,7 +41,7 @@ pub fn asset_suffix(kind: &str) -> &'static str {
 
 async fn download(url: &str) -> Result<Vec<u8>, String> {
     let client = reqwest::Client::builder()
-        .user_agent(concat!("MusicTagger/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("OpenMusicTagger/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(600))
         .build()
@@ -71,11 +71,12 @@ const OLD_EXT: &str = "exe.old";
 /// Windows pozwala zmienić nazwę działającego programu, więc stary plik odkładamy na bok.
 fn replace_portable(exe: &Path, data: &[u8], new_name: Option<String>) -> Result<PathBuf, String> {
     let dir = exe.parent().ok_or("Nieznany folder programu")?;
-    let tmp = dir.join("MusicTagger.update.tmp");
+    let tmp = dir.join("OpenMusicTagger.update.tmp");
     std::fs::write(&tmp, data).map_err(|e| format!("Brak zapisu w folderze programu ({}): {e}", dir.display()))?;
-    // Nazwa z numerem wersji („MusicTagger_1.0.9_portable.exe”) – zmieniamy na nową; inna nazwa zostaje.
+    // Nazwa z numerem wersji („OpenMusicTagger_1.0.9_portable.exe”) – zmieniamy na nową; inna nazwa zostaje.
     let cur_name = exe.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    let versioned = cur_name.to_lowercase().starts_with("musictagger_") && cur_name.to_lowercase().ends_with("_portable.exe");
+    let lower = cur_name.to_lowercase();
+    let versioned = (lower.starts_with("openmusictagger_") || lower.starts_with("musictagger_")) && lower.ends_with("_portable.exe");
     let target = match new_name {
         Some(n) if versioned => dir.join(n),
         _ => exe.to_path_buf(),
@@ -110,7 +111,7 @@ pub async fn install(url: &str) -> Result<PathBuf, String> {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         return replace_portable(&exe, &data, name);
     }
-    let path = std::env::temp_dir().join(name.unwrap_or_else(|| "MusicTagger-setup.exe".into()));
+    let path = std::env::temp_dir().join(name.unwrap_or_else(|| "OpenMusicTagger-setup.exe".into()));
     std::fs::write(&path, &data).map_err(|e| format!("Zapis instalatora: {e}"))?;
     Ok(path)
 }
@@ -124,7 +125,10 @@ pub fn cleanup_old() {
         let Ok(rd) = std::fs::read_dir(&dir) else { return };
         for e in rd.flatten() {
             let n = e.file_name().to_string_lossy().to_lowercase();
-            if n.starts_with("musictagger") && n.ends_with(".exe.old") || n == "musictagger.update.tmp" {
+            if ((n.starts_with("openmusictagger") || n.starts_with("musictagger")) && n.ends_with(".exe.old"))
+                || n == "openmusictagger.update.tmp"
+                || n == "musictagger.update.tmp"
+            {
                 let _ = std::fs::remove_file(e.path());
             }
         }
@@ -140,28 +144,28 @@ mod tests {
     #[test]
     fn asset_names() {
         assert_eq!(
-            file_name_of("https://github.com/o/r/releases/download/v1.0.12/MusicTagger_1.0.12_portable.exe").as_deref(),
-            Some("MusicTagger_1.0.12_portable.exe")
+            file_name_of("https://github.com/o/r/releases/download/v1.0.12/OpenMusicTagger_1.0.12_portable.exe").as_deref(),
+            Some("OpenMusicTagger_1.0.12_portable.exe")
         );
-        assert!("MusicTagger_1.0.12_portable.exe".ends_with(asset_suffix("portable")));
-        assert!("MusicTagger_1.0.12_x64-setup.exe".ends_with(asset_suffix("installed")));
+        assert!("OpenMusicTagger_1.0.12_portable.exe".ends_with(asset_suffix("portable")));
+        assert!("OpenMusicTagger_1.0.12_x64-setup.exe".ends_with(asset_suffix("installed")));
     }
 
     #[test]
     fn portable_swap() {
         let dir = std::env::temp_dir().join(format!("mt-upd-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
-        let exe = dir.join("MusicTagger_1.0.1_portable.exe");
+        let exe = dir.join("OpenMusicTagger_1.0.1_portable.exe");
         std::fs::write(&exe, b"old").unwrap();
-        let new = replace_portable(&exe, b"new", Some("MusicTagger_1.0.2_portable.exe".into())).unwrap();
-        assert_eq!(new, dir.join("MusicTagger_1.0.2_portable.exe"));
+        let new = replace_portable(&exe, b"new", Some("OpenMusicTagger_1.0.2_portable.exe".into())).unwrap();
+        assert_eq!(new, dir.join("OpenMusicTagger_1.0.2_portable.exe"));
         assert_eq!(std::fs::read(&new).unwrap(), b"new");
         assert!(!exe.exists());
         assert_eq!(std::fs::read(exe.with_extension(OLD_EXT)).unwrap(), b"old");
 
         let plain = dir.join("tagger.exe");
         std::fs::write(&plain, b"old").unwrap();
-        let p = replace_portable(&plain, b"new", Some("MusicTagger_1.0.2_portable.exe".into())).unwrap();
+        let p = replace_portable(&plain, b"new", Some("OpenMusicTagger_1.0.2_portable.exe".into())).unwrap();
         assert_eq!(p, plain);
         assert_eq!(std::fs::read(&plain).unwrap(), b"new");
         let _ = std::fs::remove_dir_all(&dir);

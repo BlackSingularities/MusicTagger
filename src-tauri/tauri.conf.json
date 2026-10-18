@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "MusicTagger",
+  "productName": "OpenMusicTagger",
   "version": "1.0.0",
   "identifier": "com.blacksingularities.musictagger",
   "build": {
@@ -10,7 +10,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "MusicTagger",
+        "title": "OpenMusicTagger",
         "width": 1320,
         "height": 840,
         "minWidth": 380,
@@ -34,8 +34,8 @@
     "targets": "all",
     "publisher": "BlackSingularities",
     "category": "Music",
-    "shortDescription": "Inteligentny tagger muzyki",
-    "longDescription": "Skanuje folder z muzyką, uzupełnia brakujące tagi, okładki i teksty utworów z czasami (LRC).",
+    "shortDescription": "Otwarty, inteligentny tagger muzyki",
+    "longDescription": "OpenMusicTagger skanuje bibliotekę muzyczną, uzupełnia brakujące tagi, okładki i teksty utworów z czasami (LRC).",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
