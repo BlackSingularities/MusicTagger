@@ -540,9 +540,9 @@ function renderStart(v) {
     <div class="card start-card">
       <div class="li" data-act="open-folder"><div class="ico">${icon('folderOpen')}</div><div class="grow"><div class="t-title-s">${esc(t('openFolder'))}</div><div class="t-body-s muted">${esc(isAndroid() ? t('openFolderHintA') : t('openFolderHint'))}</div></div>${icon('chevronRight', 'dim')}</div>
       ${!isAndroid() ? `<div class="li" data-act="open-files"><div class="ico">${icon('file')}</div><div class="grow"><div class="t-title-s">${esc(t('openFiles'))}</div><div class="t-body-s muted">${esc(t('openFilesHint'))}</div></div>${icon('chevronRight', 'dim')}</div>` : ''}
-      <div class="li" data-act="toggle-recursive"><div class="ico" style="background:var(--surface-highest);color:var(--on-surface-var)">${icon('layers')}</div><div class="grow"><div class="t-title-s">${esc(t('recursive'))}</div><div class="t-body-s muted">${esc(t('recursiveHint'))}</div></div><button class="switch ${S.settings.recursive !== false ? 'on' : ''}" tabindex="-1"></button></div>
-      ${recent.length ? `<div class="divider" style="margin:8px 0"></div><div class="t-label muted" style="padding:4px 16px">${esc(t('recent'))}</div>
-        ${recent.slice(0, 5).map((f) => `<div class="li" data-open="${esc(f)}"><div class="ico" style="background:var(--surface-highest);color:var(--on-surface-var)">${icon('history')}</div><div class="grow"><div class="t-title-s ellipsis">${esc(baseName(f))}</div><div class="t-body-s muted ellipsis">${esc(f)}</div></div></div>`).join('')}` : ''}
+      <div class="li" data-act="toggle-recursive"><div class="ico">${icon('layers')}</div><div class="grow"><div class="t-title-s">${esc(t('recursive'))}</div><div class="t-body-s dim">${esc(t('recursiveHint'))}</div></div><button class="switch ${S.settings.recursive !== false ? 'on' : ''}" tabindex="-1"></button></div>
+      ${recent.length ? `<div class="divider"></div><div class="t-label dim" style="padding:8px 20px">${esc(t('recent'))}</div>
+        ${recent.slice(0, 5).map((f) => `<div class="li" data-open="${esc(f)}"><div class="ico">${icon('history')}</div><div class="grow"><div class="t-title-s ellipsis">${esc(baseName(f))}</div><div class="t-body-s dim ellipsis">${esc(f)}</div></div></div>`).join('')}` : ''}
     </div>
     ${isAndroid() ? '' : `<p class="t-body-s">${esc(t('orDrop'))}</p>`}
     <div class="feature-grid">
