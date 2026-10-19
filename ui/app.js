@@ -1408,9 +1408,22 @@ async function checkUpdate(silent) {
 async function installUpdate(u, fallback) {
   if (S.jobs.apply?.running && !(await confirmBox(t('updateNow'), t('updateBusyQ'), t('updateNow')))) return;
   snack(t('updating', { v: u.latest }));
-  try { await invoke('install_update', { url: u.download }); } catch (e) {
+  try {
+    const apk = await invoke('install_update', { url: u.download });
+    if (apk) await installApk(apk, u, fallback);
+  } catch (e) {
     snack(`${t('updateFailed')}: ${errMsg(e)}`, 'bad', { label: t('download'), run: fallback });
   }
+}
+/** Android: otwiera systemowy instalator pobranego APK (bez przeglądarki). */
+async function installApk(path, u, fallback) {
+  const r = window.OmtAndroid?.installApk(path);
+  if (r === 'ok') return;
+  if (r === 'permission') {
+    snack(t('updatePerm'), 'info', { label: t('updateNow'), run: () => installApk(path, u, fallback) });
+    return;
+  }
+  throw new Error(r || t('updateFailed'));
 }
 
 // ═════════════════════════════ Akcje ═════════════════════════════

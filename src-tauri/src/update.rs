@@ -39,7 +39,7 @@ pub fn asset_suffix(kind: &str) -> &'static str {
     }
 }
 
-async fn download(url: &str) -> Result<Vec<u8>, String> {
+async fn download(url: &str, magic: &[u8]) -> Result<Vec<u8>, String> {
     let client = reqwest::Client::builder()
         .user_agent(concat!("OpenMusicTagger/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(15))
@@ -51,8 +51,8 @@ async fn download(url: &str) -> Result<Vec<u8>, String> {
         return Err(format!("Pobieranie aktualizacji: HTTP {}", r.status()));
     }
     let b = r.bytes().await.map_err(|e| format!("Pobieranie aktualizacji: {e}"))?;
-    // Plik wykonywalny Windows zaczyna się od „MZ”.
-    if b.len() < 1_000_000 || !b.starts_with(b"MZ") {
+    // Plik wykonywalny Windows zaczyna się od „MZ”, a APK (ZIP) od „PK”.
+    if b.len() < 1_000_000 || !b.starts_with(magic) {
         return Err("Pobrany plik aktualizacji jest uszkodzony".into());
     }
     Ok(b.to_vec())
@@ -98,6 +98,18 @@ fn replace_portable(exe: &Path, data: &[u8], new_name: Option<String>) -> Result
     Ok(target)
 }
 
+/// Pobiera APK do folderu aktualizacji w pamięci podręcznej aplikacji (Android).
+/// Instalację uruchamia potem MainActivity przez systemowy instalator pakietów.
+pub async fn download_apk(url: &str, cache_dir: &Path) -> Result<PathBuf, String> {
+    let data = download(url, b"PK").await?;
+    let dir = cache_dir.join("updates");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Zapis aktualizacji: {e}"))?;
+    let path = dir.join("OpenMusicTagger.apk");
+    std::fs::write(&path, &data).map_err(|e| format!("Zapis aktualizacji: {e}"))?;
+    Ok(path)
+}
+
 /// Pobiera aktualizację i ją uruchamia. Zwraca ścieżkę programu/instalatora, który trzeba uruchomić
 /// po zamknięciu bieżącej wersji.
 pub async fn install(url: &str) -> Result<PathBuf, String> {
@@ -105,7 +117,7 @@ pub async fn install(url: &str) -> Result<PathBuf, String> {
     if kind != "portable" && kind != "installed" {
         return Err("Automatyczna aktualizacja nie jest dostępna na tym systemie".into());
     }
-    let data = download(url).await?;
+    let data = download(url, b"MZ").await?;
     let name = file_name_of(url);
     if kind == "portable" {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;

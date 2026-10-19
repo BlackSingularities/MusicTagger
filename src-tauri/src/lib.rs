@@ -209,21 +209,27 @@ async fn check_update() -> Result<UpdateInfo, String> {
         latest: tag,
         url: v.get("html_url").and_then(|x| x.as_str()).unwrap_or("").into(),
         notes: v.get("body").and_then(|x| x.as_str()).unwrap_or("").chars().take(2000).collect(),
-        can_install: matches!(kind, "portable" | "installed"),
+        can_install: matches!(kind, "portable" | "installed" | "android"),
         download,
     })
 }
 
 /// Pobiera aktualizację, uruchamia nową wersję (lub instalator) i zamyka bieżącą.
+/// Na Androidzie tylko pobiera APK i zwraca jego ścieżkę – instalację uruchamia interfejs.
 #[tauri::command]
-async fn install_update(app: AppHandle, url: String) -> Result<(), String> {
+async fn install_update(app: AppHandle, url: String) -> Result<Option<String>, String> {
     if !url.starts_with("https://github.com/BlackSingularities/MusicTagger/releases/download/") {
         return Err("Nieprawidłowy adres aktualizacji".into());
+    }
+    if update::install_kind() == "android" {
+        let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+        let apk = update::download_apk(&url, &cache).await?;
+        return Ok(Some(apk.to_string_lossy().into_owned()));
     }
     let run = update::install(&url).await?;
     std::process::Command::new(&run).spawn().map_err(|e| format!("Uruchomienie nowej wersji: {e}"))?;
     app.exit(0);
-    Ok(())
+    Ok(None)
 }
 
 // ───────────────────────────── Przeglądanie folderów ─────────────────────────────
