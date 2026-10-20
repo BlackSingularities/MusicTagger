@@ -522,7 +522,7 @@ function renderAll() {
 }
 function renderView() {
   const v = $('#view');
-  document.body.classList.remove('has-fab', 'has-actions');
+  document.body.classList.remove('has-fab', 'has-actions', 'm-start');
   if (S.view === 'review') return renderReview(v);
   if (S.view === 'history') return renderHistory(v);
   if (S.view === 'settings') return renderSettings(v);
@@ -532,6 +532,7 @@ function renderView() {
 // ─────────────── Biblioteka ───────────────
 function renderStart(v) {
   const recent = S.settings.recentFolders || [];
+  if (isAndroid()) return renderStartMobile(v, recent);
   v.innerHTML = `<div class="empty">
     ${!S.storageOk ? `<div class="banner err" style="max-width:560px;text-align:left">${icon('shield', 'lg')}<div class="grow"><b>${esc(t('permTitle'))}</b><div class="t-body-s" style="margin-top:4px">${esc(t('permText'))}</div></div><button class="btn text" data-act="perm-check">${esc(t('permCheck'))}</button></div>` : ''}
     <div class="hero-logo">${logo()}</div>
@@ -550,6 +551,22 @@ function renderStart(v) {
       <div class="card feature">${icon('image', 'lg')}<b>${esc(t('feat2'))}</b><span>${esc(t('feat2d'))}</span></div>
       <div class="card feature">${icon('lyrics', 'lg')}<b>${esc(t('feat3'))}</b><span>${esc(t('feat3d'))}</span></div>
     </div></div>`;
+}
+/** Ekran startowy na Androida – układ jak w OpenPDF: nagłówek, duży biały przycisk, kafle, ostatnie. */
+function renderStartMobile(v, recent) {
+  document.body.classList.add('m-start');
+  v.innerHTML = `<div class="m-home">
+    <div class="m-brand"><div class="m-logo">${logo()}</div><div class="grow"><h1>OpenMusicTagger</h1><p>${esc(t('libSub'))}</p></div>
+      <button class="ibtn tonal" data-nav="settings" title="${esc(t('nav_settings'))}">${icon('settings')}</button></div>
+    ${!S.storageOk ? `<div class="banner err">${icon('shield', 'lg')}<div class="grow"><b>${esc(t('permTitle'))}</b><div class="t-body-s" style="margin-top:4px">${esc(t('permText'))}</div></div><button class="btn text" data-act="perm-check">${esc(t('permCheck'))}</button></div>` : ''}
+    <button class="m-primary" data-act="open-folder">${icon('folderOpen', 'lg')}<span class="grow"><b>${esc(t('openFolder'))}</b><span>${esc(t('openFolderHintA'))}</span></span></button>
+    <div class="m-tiles">
+      <div class="m-tile" data-act="toggle-recursive">${icon('layers', 'lg')}<span>${esc(t('recursive'))}</span><button class="switch ${S.settings.recursive !== false ? 'on' : ''}" tabindex="-1"></button></div>
+      <div class="m-tile" data-nav="history">${icon('history', 'lg')}<span>${esc(t('nav_history'))}</span></div>
+    </div>
+    <div class="m-label">${recent.length ? esc(t('recent')).toUpperCase() : ''}</div>
+    ${recent.length ? `<div class="m-group">${recent.slice(0, 8).map((f) => `<div class="li-row click" data-open="${esc(f)}">${icon('folder')}<div class="txt"><b class="ellipsis">${esc(baseName(f))}</b><span class="ellipsis">${esc(f)}</span></div>${icon('chevronRight', 'dim')}</div>`).join('')}</div>` : `<p class="m-hint">${esc(t('welcomeText'))}</p>`}
+  </div>`;
 }
 function renderLibrary(v) {
   if (!S.tracks.length) {
@@ -1325,11 +1342,11 @@ function renderSettings(v) {
   const num = (k, min, max, step, fmt) => `<div class="range-wrap"><input type="range" data-num="${k}" min="${min}" max="${max}" step="${step}" value="${s[k]}"><b data-numv="${k}">${fmt(s[k])}</b></div>`;
   const sel = (k, opts) => `<select class="sel" data-sel="${k}">${opts.map(([val, l]) => `<option value="${val}" ${String(s[k]) === String(val) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
   const px = (n) => n + ' px';
-  const ACC = { violet: '#6750a4', blue: '#0061a4', green: '#006e1c', orange: '#8b5000', pink: '#984061' };
+  const ACC = { mono: '#ffffff', violet: '#6750a4', blue: '#0061a4', green: '#006e1c', orange: '#8b5000', pink: '#984061' };
   v.innerHTML = `<div class="page"><div class="page-inner">
     <div class="list-card"><h2>${icon('sun')}${esc(t('sAppearance'))}</h2>
-      ${row(t('theme'), '', sel('theme', [['dark', t('themeDark')], ['light', t('themeLight')], ['auto', t('themeAuto')]]))}
-      ${row(t('accent'), '', `<div class="swatches">${Object.entries(ACC).map(([a, c]) => `<button class="swatch ${s.accent === a ? 'on' : ''}" data-accent-pick="${a}" style="background:${c}">${icon('check')}</button>`).join('')}</div>`)}
+      ${isAndroid() ? '' : row(t('theme'), '', sel('theme', [['dark', t('themeDark')], ['light', t('themeLight')], ['auto', t('themeAuto')]]))}
+      ${isAndroid() ? '' : row(t('accent'), '', `<div class="swatches">${Object.entries(ACC).map(([a, c]) => `<button class="swatch ${s.accent === a ? 'on' : ''}" data-accent-pick="${a}" style="background:${c}">${icon('check')}</button>`).join('')}</div>`)}
       ${row(t('language'), '', sel('language', [['auto', t('langAuto')], ['pl', 'Polski'], ['en', 'English']]))}</div>
     <div class="list-card"><h2>${icon('folderOpen')}${esc(t('sScan'))}</h2>${swRow('recursive', t('recursive'), t('recursiveHint'))}</div>
     <div class="list-card"><h2>${icon('sparkles')}${esc(t('sBehavior'))}</h2>
@@ -1392,8 +1409,11 @@ function renderSettings(v) {
 function applyTheme() {
   let th = S.settings.theme || 'dark';
   if (th === 'auto') th = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-  document.documentElement.dataset.theme = th;
-  document.documentElement.dataset.accent = S.settings.accent || 'violet';
+  const root = document.documentElement;
+  // Android: wyłącznie czarno-biały interfejs, jak w OpenPDF.
+  root.classList.toggle('android', isAndroid());
+  root.dataset.theme = isAndroid() ? 'dark' : th;
+  root.dataset.accent = isAndroid() ? 'mono' : S.settings.accent || 'violet';
 }
 async function checkUpdate(silent) {
   try {

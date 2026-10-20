@@ -37,6 +37,8 @@
   --shadow3: 0 8px 28px rgba(0,0,0,.8), 0 0 0 1px rgba(255,255,255,.08);
 }
 /* Kolory akcentu (paleta tonalna M3) */
+[data-theme="light"][data-accent="mono"] { --primary: #000000; --on-primary: #fff; --primary-c: #000000; --on-primary-c: #fff; --secondary-c: #e9e9e9; --on-secondary-c: #111111; --tertiary: #444444; --tertiary-c: #e0e0e0; --on-tertiary-c: #111111; }
+[data-theme="dark"][data-accent="mono"]  { --primary: #ffffff; --on-primary: #000; --primary-c: #ffffff; --on-primary-c: #000; --secondary-c: #1c1c1c; --on-secondary-c: #ffffff; --tertiary: #e0e0e0; --tertiary-c: #2a2a2a; --on-tertiary-c: #ffffff; }
 [data-theme="light"][data-accent="violet"] { --primary: #6750a4; --on-primary: #fff; --primary-c: #eaddff; --on-primary-c: #21005d; --secondary-c: #e9e9e9; --on-secondary-c: #111111; --tertiary: #7d5260; --tertiary-c: #ffd8e4; --on-tertiary-c: #31111d; }
 [data-theme="dark"][data-accent="violet"]  { --primary: #d0bcff; --on-primary: #381e72; --primary-c: #4f378b; --on-primary-c: #eaddff; --secondary-c: #262626; --on-secondary-c: #f2f2f2; --tertiary: #efb8c8; --tertiary-c: #633b48; --on-tertiary-c: #ffd8e4; }
 [data-theme="light"][data-accent="blue"]   { --primary: #0061a4; --on-primary: #fff; --primary-c: #d1e4ff; --on-primary-c: #001d36; --secondary-c: #e9e9e9; --on-secondary-c: #111111; --tertiary: #6b5778; --tertiary-c: #f2daff; --on-tertiary-c: #251431; }
@@ -689,3 +691,157 @@ body.has-jobs .list-scroll { padding-bottom: 180px; }
   body.sheet-open #dock { left: 50%; }
   .job { padding-left: 12px; }
 }
+
+/* ═════════════ Android – czarno-biały, minimalistyczny układ jak w OpenPDF ═════════════
+   Czysta czerń, biel jako akcent, okrągłe przyciski #1C1C1C, karty z 6% bieli,
+   nagłówki sekcji WIELKIMI LITERAMI, czerwień tylko dla usuwania i błędów. Bez cieni. */
+html.android {
+  --surface: #000; --surface-low: #000; --surface-c: #000; --surface-high: #1c1c1c; --surface-highest: #1c1c1c;
+  --on-surface-var: rgba(255,255,255,.7); --outline: rgba(255,255,255,.4); --outline-var: rgba(255,255,255,.1);
+  --card: rgba(255,255,255,.06);
+  --error: #ff3b47; --on-error: #fff; --error-c: rgba(255,59,71,.16); --on-error-c: #ff8a91;
+  --success: #fff; --success-c: rgba(255,255,255,.12); --on-success-c: #fff;
+  --warn: #e0e0e0; --warn-c: rgba(255,255,255,.1); --on-warn-c: #e0e0e0;
+  --inverse-surface: #1c1c1c; --inverse-on-surface: #fff;
+  --shadow1: none; --shadow3: none; --scrim: rgba(0,0,0,.8);
+  --r-lg: 16px; --r-md: 16px; --r-xl: 22px;
+}
+html.android body { font-family: Roboto, "Noto Sans", system-ui, sans-serif; }
+html.android .btn::before, html.android .ibtn::before, html.android .chip::before { display: none; }
+html.android .btn, html.android .ibtn, html.android .chip, html.android .rail-item .pill, html.android .m-primary, html.android .m-tile { transition: transform .12s, background .16s, color .16s; }
+html.android .btn:active, html.android .ibtn:active, html.android .chip:active, html.android .m-primary:active, html.android .m-tile:active { transform: scale(.94); }
+
+/* Pasek górny: duży, gruby tytuł; przyciski to okrągłe bloki */
+html.android #topbar { min-height: 64px; padding: calc(10px + var(--safe-t)) 12px 6px 20px; gap: 8px; }
+html.android #topbar .title h1 { font-size: 26px; line-height: 32px; font-weight: 900; letter-spacing: -.2px; }
+html.android #topbar .title .sub { color: rgba(255,255,255,.55); }
+html.android #topbar.ctx { background: #000; color: #fff; padding-left: 12px; }
+html.android #topbar.ctx .ibtn { color: #fff; }
+html.android body.m-start #topbar { display: none; }
+html.android .ibtn { width: 44px; height: 44px; background: #1c1c1c; color: #fff; }
+html.android .ibtn.on { background: #fff; color: #000; }
+html.android .btn { height: 44px; font-weight: 700; }
+html.android .btn.sm { height: 36px; }
+html.android .btn.filled { background: #fff; color: #000; }
+html.android .btn.tonal { background: #1c1c1c; color: #fff; }
+html.android .btn.outlined { border: 1px solid rgba(255,255,255,.25); color: #fff; }
+html.android .btn.text { color: #fff; }
+html.android .btn.danger, html.android .btn.text.danger { color: #ff3b47; }
+html.android .btn.filled.danger { background: #ff3b47; color: #fff; }
+html.android .fab { border-radius: 999px; background: #fff; color: #000; height: 56px; min-width: 56px; justify-content: center; font-weight: 700; }
+
+/* Dolna nawigacja: czarna, aktywna pozycja = biała pigułka z czarną ikoną */
+html.android #navbar { background: #000; height: calc(72px + var(--safe-b)); }
+html.android #navbar .rail-item { padding: 8px 0 10px; color: rgba(255,255,255,.55); }
+html.android #navbar .rail-item .pill { height: 34px; }
+html.android #navbar .rail-item.active { color: #fff; }
+html.android #navbar .rail-item.active .pill { background: #fff; color: #000; }
+html.android #navbar .rail-item .lbl { font-size: 11px; font-weight: 700; }
+html.android .badge { background: #ff3b47; color: #fff; }
+
+/* Chipy i przełączniki: pigułki */
+html.android .chip { border: 0; background: #1c1c1c; color: rgba(255,255,255,.8); border-radius: 999px; height: 36px; }
+html.android .chip.on, html.android .chip.input { background: #fff; color: #000; }
+html.android .seg { border: 0; background: #1c1c1c; gap: 0; padding: 3px; height: 40px; }
+html.android .seg.sm { height: 36px; }
+html.android .seg button { background: transparent; color: rgba(255,255,255,.7); border-radius: 999px; }
+html.android .seg button.on { background: #fff; color: #000; }
+html.android .switch { border: 0; background: rgba(255,255,255,.18); }
+html.android .switch::after { background: #fff; left: 4px; top: 4px; width: 24px; height: 24px; }
+html.android .switch.on { background: #fff; }
+html.android .switch.on::after { background: #000; left: 24px; top: 4px; }
+html.android .cb { border-radius: 6px; border-color: rgba(255,255,255,.55); color: #000; }
+html.android .cb.on, html.android .cb.part { background: #fff; border-color: #fff; }
+html.android .cb.part::after { background: #000; }
+html.android input[type=range] { accent-color: #fff; }
+
+/* Pola tekstowe */
+html.android .inp, html.android .ta, html.android select.sel { border: 0; border-radius: 14px; background-color: #1c1c1c; min-height: 48px; }
+html.android .inp:focus, html.android .ta:focus, html.android select.sel:focus { box-shadow: 0 0 0 1px #fff; }
+html.android .inp.changed { box-shadow: 0 0 0 1px rgba(255,255,255,.6); }
+html.android .inp.blank { box-shadow: 0 0 0 1px rgba(255,255,255,.12); }
+html.android .search { background: #1c1c1c; }
+
+/* Karty, grupy i nagłówki sekcji */
+html.android .card, html.android .list-card, html.android .summary, html.android .lrc-banner, html.android .lyr-prev { background: var(--card); border-radius: 16px; }
+html.android .list-card > h2, html.android .menu .hdr { color: #fff; font-size: 11px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; }
+html.android .list-card > h2 .ic { width: 16px; height: 16px; }
+html.android .li-row + .li-row { border-top: 0; }
+html.android .li-row .txt b { font-weight: 500; }
+html.android .banner { background: #1c1c1c; color: #fff; border-radius: 16px; }
+html.android .banner.err { background: rgba(255,59,71,.16); color: #fff; }
+html.android .tag { border-radius: 999px; background: #1c1c1c; color: rgba(255,255,255,.8); }
+html.android .tag.primary { background: #fff; color: #000; }
+html.android .ring .bg { stroke: rgba(255,255,255,.12); }
+html.android .ring .fg { stroke: #fff; }
+html.android .lp { background: rgba(255,255,255,.12); }
+html.android .lp > i { background: #fff; }
+html.android .st.proposed { background: #fff; color: #000; }
+html.android .st.applied, html.android .st.upToDate { background: rgba(255,255,255,.12); color: #fff; }
+html.android .conf.hi { background: #fff; color: #000; }
+html.android .conf.mid { background: #1c1c1c; color: #fff; }
+html.android .conf.lo { background: #1c1c1c; color: #ff8a91; }
+html.android .diff-wrap { border: 0; background: var(--card); }
+html.android .diff .new { color: #fff; font-weight: 600; }
+html.android .diff .old { color: rgba(255,255,255,.45); }
+html.android .cover { border-radius: 12px; background: #1c1c1c; }
+html.android .cv.on { border-color: #fff; background: rgba(255,255,255,.08); }
+html.android .cv .check { background: #fff; color: #000; }
+
+/* Listy: zaokrąglone wiersze, zaznaczenie = jaśniejsze tło, aktywny = biały blok */
+html.android .trow { border-radius: 16px; left: 8px; right: 8px; }
+html.android .trow::before { border-radius: inherit; }
+html.android .trow.sel { background: rgba(255,255,255,.1); }
+html.android .trow.active, html.android .rv-item.active, html.android .alt.on, html.android .result.on { background: #fff; color: #000; }
+html.android .trow.active .t2, html.android .rv-item.active .t2 { color: rgba(0,0,0,.6); opacity: 1; }
+html.android .rv-item { border-radius: 16px; }
+html.android .rv-bulk { background: #1c1c1c; color: #fff; border-radius: 999px; }
+html.android .rv-actions { background: #000; border-top: 1px solid rgba(255,255,255,.08); }
+html.android .tabs { border-bottom: 0; gap: 6px; padding: 4px 12px 8px; }
+html.android .tab { border-radius: 999px; height: 38px; min-width: 0; background: #1c1c1c; color: rgba(255,255,255,.75); flex: none; padding: 0 16px; }
+html.android .tab.on { background: #fff; color: #000; }
+html.android .tab.on::after { display: none; }
+html.android .karaoke { background: var(--card); color: #fff; }
+html.android .karaoke .ln.cur { color: #fff; }
+
+/* Arkusze, dialogi, menu, powiadomienia */
+html.android #sheet { background: #000; }
+html.android .sheet-foot { border-top: 1px solid rgba(255,255,255,.08); }
+html.android .dialog { background: #000; box-shadow: 0 0 0 1px rgba(255,255,255,.12); border-radius: 24px; }
+html.android .dialog-head h3 { font-size: 20px; font-weight: 700; }
+html.android .menu { background: #1c1c1c; border-radius: 18px; padding: 6px 0; }
+html.android .mi { height: 50px; }
+html.android .mi .ic { color: #fff; }
+html.android .snackbar { background: #1c1c1c; color: #fff; border-radius: 999px; padding-left: 20px; }
+html.android .snackbar .btn { color: #fff; }
+html.android .snackbar.bad { background: #ff3b47; color: #fff; }
+html.android .jobs-card { background: #1c1c1c; border-radius: 22px; }
+html.android .job .ic { color: #fff; }
+html.android .job + .job { border-top: 1px solid rgba(255,255,255,.08); }
+
+/* Ekran startowy (OpenPDF: logo + tytuł, duży biały przycisk, kafle, OSTATNIE) */
+.m-home { flex: 1; overflow: auto; padding: calc(16px + var(--safe-t)) 16px 120px; display: flex; flex-direction: column; gap: 14px; }
+.m-brand { display: flex; align-items: center; gap: 12px; }
+.m-logo { width: 58px; height: 58px; border-radius: 16px; overflow: hidden; flex: none; }
+.m-logo .logo-img { filter: none; }
+.m-brand h1 { margin: 0; font-size: 26px; line-height: 32px; font-weight: 900; letter-spacing: -.3px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-brand p { margin: 0; font-size: 13px; color: rgba(255,255,255,.7); }
+.m-primary {
+  display: flex; align-items: center; gap: 14px; width: 100%; padding: 18px 20px; border: 0; border-radius: 22px;
+  background: #fff; color: #000; text-align: left; cursor: pointer;
+}
+.m-primary .ic { width: 28px; height: 28px; }
+.m-primary b { display: block; font-size: 17px; line-height: 22px; font-weight: 700; }
+.m-primary span span { display: block; font-size: 12px; color: rgba(0,0,0,.6); }
+.m-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.m-tile {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 16px; border-radius: 18px;
+  background: #1c1c1c; color: #fff; cursor: pointer; position: relative; min-height: 96px; font-weight: 600; font-size: 13px;
+}
+.m-tile .switch { position: absolute; right: 14px; top: 14px; }
+.m-label { padding: 8px 4px 0; font-size: 11px; font-weight: 700; letter-spacing: 1.4px; color: #fff; }
+.m-label:empty { display: none; }
+.m-group { background: rgba(255,255,255,.06); border-radius: 16px; overflow: hidden; }
+.m-group .li-row { gap: 14px; padding: 12px 16px; flex-wrap: nowrap; }
+.m-group .li-row .txt b, .m-group .li-row .txt span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-hint { margin: 0 4px; color: rgba(255,255,255,.6); font-size: 13px; line-height: 1.5; }
