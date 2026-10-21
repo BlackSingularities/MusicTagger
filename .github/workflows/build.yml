@@ -16,8 +16,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Wersja: 1.0.<numer buildu> – rośnie automatycznie z każdym wdrożeniem.
-  APP_VERSION: 1.0.${{ github.run_number }}
+  # Wersja: 1.2.<numer buildu − 36> – rośnie automatycznie z każdym wdrożeniem (build 36 = 1.2.0).
+  VERSION_BASE: "1.2"
+  VERSION_OFFSET: 36
 
 jobs:
   test:
@@ -53,6 +54,11 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: Numer wersji
+        shell: bash
+        run: |
+          n=$(( ${{ github.run_number }} - VERSION_OFFSET )); if [ "$n" -lt 0 ]; then n=0; fi
+          echo "APP_VERSION=${VERSION_BASE}.$n" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -87,6 +93,11 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Numer wersji
+        shell: bash
+        run: |
+          n=$(( ${{ github.run_number }} - VERSION_OFFSET )); if [ "$n" -lt 0 ]; then n=0; fi
+          echo "APP_VERSION=${VERSION_BASE}.$n" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -151,6 +162,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Numer wersji
+        shell: bash
+        run: |
+          n=$(( ${{ github.run_number }} - VERSION_OFFSET )); if [ "$n" -lt 0 ]; then n=0; fi
+          echo "APP_VERSION=${VERSION_BASE}.$n" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
           path: dist
