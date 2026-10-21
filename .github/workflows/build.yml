@@ -123,20 +123,13 @@ jobs:
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           UNSIGNED=$(find src-tauri/gen/android/app/build/outputs/apk -name '*release*.apk' | head -1)
           echo "APK: $UNSIGNED"
-          if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > release.jks
-            ALIAS="${KEY_ALIAS:-musictagger}"
-          elif [ "${{ github.event_name }}" != "pull_request" ]; then
-            # Wydanie z jednorazowym kluczem psuje aktualizacje u wszystkich użytkowników – nie publikujemy go.
-            echo "::error::Brak sekretu ANDROID_KEYSTORE_BASE64 – wydanie musi być podpisane stałym kluczem."
+          # Każde APK musi mieć ten sam podpis – inaczej Android odrzuca aktualizację.
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::Brak sekretów ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD – APK musi być podpisany stałym kluczem."
             exit 1
-          else
-            echo "::warning::Brak sekretu ANDROID_KEYSTORE_BASE64 – APK podpisany jednorazowym kluczem (aktualizacja będzie wymagała odinstalowania poprzedniej wersji). Instrukcja w README."
-            KEYSTORE_PASSWORD="musictagger-ci"
-            ALIAS="musictagger"
-            keytool -genkeypair -v -keystore release.jks -storepass "$KEYSTORE_PASSWORD" -keypass "$KEYSTORE_PASSWORD" \
-              -alias "$ALIAS" -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=OpenMusicTagger, O=BlackSingularities, C=PL"
           fi
+          echo "$KEYSTORE_B64" | base64 -d > release.jks
+          ALIAS="${KEY_ALIAS:-musictagger}"
           mkdir -p dist
           "$BT/zipalign" -f -p 4 "$UNSIGNED" aligned.apk
           "$BT/apksigner" sign --ks release.jks --ks-pass "pass:$KEYSTORE_PASSWORD" --key-pass "pass:$KEYSTORE_PASSWORD" \
