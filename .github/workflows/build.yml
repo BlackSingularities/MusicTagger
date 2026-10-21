@@ -126,6 +126,10 @@ jobs:
           if [ -n "$KEYSTORE_B64" ]; then
             echo "$KEYSTORE_B64" | base64 -d > release.jks
             ALIAS="${KEY_ALIAS:-musictagger}"
+          elif [ "${{ github.event_name }}" != "pull_request" ]; then
+            # Wydanie z jednorazowym kluczem psuje aktualizacje u wszystkich użytkowników – nie publikujemy go.
+            echo "::error::Brak sekretu ANDROID_KEYSTORE_BASE64 – wydanie musi być podpisane stałym kluczem."
+            exit 1
           else
             echo "::warning::Brak sekretu ANDROID_KEYSTORE_BASE64 – APK podpisany jednorazowym kluczem (aktualizacja będzie wymagała odinstalowania poprzedniej wersji). Instrukcja w README."
             KEYSTORE_PASSWORD="musictagger-ci"

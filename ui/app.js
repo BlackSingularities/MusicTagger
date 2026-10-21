@@ -1446,6 +1446,10 @@ async function installApk(path, u, fallback) {
     snack(t('updatePerm'), 'info', { label: t('updateNow'), run: () => installApk(path, u, fallback) });
     return;
   }
+  if (r === 'signature') {
+    snack(t('updateSig'), 'bad', { label: t('download'), run: fallback });
+    return;
+  }
   throw new Error(r || t('updateFailed'));
 }
 
