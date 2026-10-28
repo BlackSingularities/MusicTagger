@@ -1,24 +1,19 @@
 name: Build & Release
 
+# Budowanie i wydanie wyłącznie po wypchnięciu tagu wersji (np. v1.2.3).
 on:
   push:
-    branches: [main, master, "claude/**"]
     tags: ["v*"]
-  pull_request:
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
   group: openmusictagger-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
-  # Wersja: 1.2.<numer buildu − 36> – rośnie automatycznie z każdym wdrożeniem (build 36 = 1.2.0).
-  VERSION_BASE: "1.2"
-  VERSION_OFFSET: 36
 
 jobs:
   test:
@@ -57,8 +52,7 @@ jobs:
       - name: Numer wersji
         shell: bash
         run: |
-          n=$(( ${{ github.run_number }} - VERSION_OFFSET )); if [ "$n" -lt 0 ]; then n=0; fi
-          echo "APP_VERSION=${VERSION_BASE}.$n" >> "$GITHUB_ENV"
+          echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -96,8 +90,7 @@ jobs:
       - name: Numer wersji
         shell: bash
         run: |
-          n=$(( ${{ github.run_number }} - VERSION_OFFSET )); if [ "$n" -lt 0 ]; then n=0; fi
-          echo "APP_VERSION=${VERSION_BASE}.$n" >> "$GITHUB_ENV"
+          echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -156,7 +149,6 @@ jobs:
   release:
     name: Publikacja
     needs: [windows, android]
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -165,8 +157,7 @@ jobs:
       - name: Numer wersji
         shell: bash
         run: |
-          n=$(( ${{ github.run_number }} - VERSION_OFFSET )); if [ "$n" -lt 0 ]; then n=0; fi
-          echo "APP_VERSION=${VERSION_BASE}.$n" >> "$GITHUB_ENV"
+          echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -175,8 +166,6 @@ jobs:
         run: |
           {
             echo "## OpenMusicTagger ${APP_VERSION}"
-            echo
-            echo "Gałąź: \`${GITHUB_REF_NAME}\` · commit ${GITHUB_SHA::7}"
             echo
             echo "| Plik | Do czego |"
             echo "|---|---|"
@@ -188,10 +177,9 @@ jobs:
           cat notes.md
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.APP_VERSION }}
-          name: OpenMusicTagger ${{ env.APP_VERSION }}${{ (github.ref_name != 'main' && github.ref_name != 'master' && !startsWith(github.ref, 'refs/tags/')) && format(' ({0})', github.ref_name) || '' }}
+          tag_name: ${{ github.ref_name }}
+          name: OpenMusicTagger ${{ env.APP_VERSION }}
           body_path: notes.md
           target_commitish: ${{ github.sha }}
-          prerelease: ${{ github.ref_name != 'main' && github.ref_name != 'master' && !startsWith(github.ref, 'refs/tags/') }}
-          make_latest: ${{ github.ref_name == 'main' || github.ref_name == 'master' || startsWith(github.ref, 'refs/tags/') }}
+          make_latest: true
           files: dist/*

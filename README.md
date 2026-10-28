@@ -52,7 +52,7 @@ Obsługiwane formaty: MP3, FLAC, M4A/MP4/AAC/ALAC, OGG, OPUS, WAV, WavPack, APE,
 
 ## Pobieranie
 
-Każdy push buduje aplikację automatycznie (GitHub Actions → **Releases**):
+Aplikację buduje automatycznie wypchnięcie tagu wersji (np. `v1.2.3`). Pliki trafiają do **Releases**:
 
 | Plik | Platforma |
 |---|---|
@@ -61,7 +61,7 @@ Każdy push buduje aplikację automatycznie (GitHub Actions → **Releases**):
 | `OpenMusicTagger_x.y.z_portable.exe` | Windows, bez instalacji |
 | `OpenMusicTagger_x.y.z.apk` | Android 8.0+ |
 
-Push na `main` publikuje wydanie „Latest”. Push na inną gałąź publikuje wydanie testowe (pre-release).
+Strona aplikacji: <https://blacksingularities.github.io/MusicTagger/>
 
 ### Android: dostęp do plików
 
@@ -119,6 +119,6 @@ ui/               interfejs (HTML/CSS/JS, bez kroku budowania)
 
 ---
 
-**Projekt i wykonanie: [redzikowski.com](https://redzikowski.com)**
+**Pomysł i wykonanie: Adam Rędzikowski · [redzikowski.com](https://redzikowski.com)**
 
 <a href="https://buycoffee.to/adamredzikowski" target="_blank"><img src="https://buycoffee.to/static/img/share/share-button-dark--pl.png" style="width: 351px; height: 92px" width="351" height="92" alt="Postaw kawę dla adamredzikowski na buycoffee.to"></a>

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenMusicTagger — Porządek w bibliotece muzycznej</title>
+<meta name="description" content="Skanuje folder z muzyką i sama uzupełnia brakujące tagi, okładki w wysokiej rozdzielczości i teksty z czasami. Każdą zmianę możesz przejrzeć, zanim trafi do pliku.">
+<meta property="og:title" content="OpenMusicTagger">
+<meta property="og:description" content="Porządek w bibliotece muzycznej">
+<link rel="icon" href="icon.png">
+<style>
+  :root {
+    --bg: #f6f6f4; --surface: #ffffff; --text: #141414; --muted: #5c5c58;
+    --line: #e2e1dc; --accent: #141414; --on-accent: #ffffff; --coffee: #f2c14e; --on-coffee: #241a00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #000000; --surface: #111111; --text: #f2f2f0; --muted: #a2a29c;
+      --line: #262626; --accent: #f2f2f0; --on-accent: #000000;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  a { color: inherit; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 16px; }
+
+  header.hero { padding: 72px 0 56px; text-align: center; }
+  .icon { width: 96px; height: 96px; border-radius: 24px; display: block; margin: 0 auto 24px; }
+  .mono { display: grid; place-items: center; background: var(--accent); color: var(--on-accent);
+          font-size: 48px; font-weight: 700; }
+  h1 { font-size: clamp(36px, 7vw, 56px); line-height: 1.05; margin: 0 0 12px; letter-spacing: -0.02em; }
+  .tagline { font-size: clamp(18px, 3vw, 22px); color: var(--muted); margin: 0 auto 20px; max-width: 34ch; }
+  .lead { max-width: 62ch; margin: 0 auto 32px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 14px 24px; border-radius: 999px;
+         font-weight: 600; text-decoration: none; border: 1px solid transparent; }
+  .btn.primary { background: var(--accent); color: var(--on-accent); }
+  .btn.ghost { border-color: var(--line); background: var(--surface); }
+  .btn:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+  .meta { margin-top: 16px; font-size: 14px; color: var(--muted); }
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 20px 0 0; padding: 0; list-style: none; }
+  .pills li { font-size: 13px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); }
+
+  section { padding: 40px 0; }
+  h2 { font-size: 26px; margin: 0 0 20px; letter-spacing: -0.01em; }
+  .features { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px;
+              grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .feat { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 20px; }
+  .feat h3 { font-size: 17px; margin: 0 0 6px; }
+  .feat p { margin: 0; color: var(--muted); font-size: 15px; }
+
+  .support { background: var(--surface); border: 1px solid var(--line); border-radius: 24px;
+             padding: 32px; text-align: center; }
+  .support p { max-width: 56ch; margin: 0 auto 20px; color: var(--muted); }
+  .btn.coffee { background: var(--coffee); color: var(--on-coffee); }
+
+  footer { padding: 32px 0 48px; text-align: center; font-size: 14px; color: var(--muted); }
+  footer a { font-weight: 600; color: var(--text); }
+</style>
+</head>
+<body>
+<header class="hero wrap">
+  <img class="icon" src="icon.png" alt="" width="96" height="96">
+  <h1>OpenMusicTagger</h1>
+  <p class="tagline">Porządek w bibliotece muzycznej</p>
+  <p class="lead">Skanuje folder z muzyką i sama uzupełnia brakujące tagi, okładki w wysokiej rozdzielczości i teksty z czasami. Każdą zmianę możesz przejrzeć, zanim trafi do pliku.</p>
+  <div class="actions">
+    <a class="btn primary" id="download" href="https://github.com/BlackSingularities/MusicTagger/releases/latest">Pobierz na Androida</a>
+    <a class="btn ghost" id="download-win" href="https://github.com/BlackSingularities/MusicTagger/releases/latest">Pobierz na Windows</a>
+  </div>
+  <p class="meta" id="version">Android 8.0 lub nowszy · Windows 10/11</p>
+  <ul class="pills">
+    <li>Darmowy</li><li>Bez reklam</li><li>Bez śledzenia</li><li>Android i Windows</li>
+  </ul>
+</header>
+
+<main class="wrap">
+  <section aria-labelledby="f">
+    <h2 id="f">Co potrafi</h2>
+    <ul class="features">
+        <li class="feat"><h3>Brakujące tagi</h3><p>Tytuł, wykonawca, album, rok, numer, gatunek, ISRC, BPM i identyfikatory MusicBrainz.</p></li>
+        <li class="feat"><h3>Okładki do 1400 px</h3><p>Wybór spośród kilku źródeł, zamiana zbyt małych okładek na lepsze.</p></li>
+        <li class="feat"><h3>Teksty z czasami</h3><p>Karaoke (LRC) z LRCLIB i NetEase, zapisane w pliku lub obok w .lrc.</p></li>
+        <li class="feat"><h3>Rozpoznawanie po dźwięku</h3><p>Odcisk AcoustID rozpoznaje utwór nawet bez tagów i sensownej nazwy.</p></li>
+        <li class="feat"><h3>Weryfikacja przed zapisem</h3><p>Porównanie „przed / po”, skróty klawiszowe i akceptacja pewnych zmian zbiorczo.</p></li>
+        <li class="feat"><h3>Historia z cofaniem</h3><p>Cofniesz pojedynczy plik albo całą operację. Raport CSV.</p></li>
+        <li class="feat"><h3>Wiele źródeł naraz</h3><p>MusicBrainz, Deezer i iTunes. Preferuje oryginalny album i polskie znaki.</p></li>
+        <li class="feat"><h3>Wszystkie popularne formaty</h3><p>MP3, FLAC, M4A, OGG, OPUS, WAV, APE, AIFF i inne.</p></li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="support">
+      <h2>Darmowy, bez reklam</h2>
+      <p>OpenMusicTagger jest i zostanie darmowy. Pomysł i wykonanie: Adam Rędzikowski. Jeśli aplikacja Ci się przydaje, możesz wesprzeć jej rozwój, stawiając mi kawę.</p>
+      <a class="btn coffee" href="https://buycoffee.to/adamredzikowski">☕ Postaw kawę na buycoffee.to</a>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap">
+  Pomysł i wykonanie: Adam Rędzikowski · <a href="https://redzikowski.com">redzikowski.com</a>
+</footer>
+
+<script>
+  // Przycisk prowadzi prosto do pliku APK z najnowszego wydania.
+  fetch("https://api.github.com/repos/BlackSingularities/MusicTagger/releases/latest")
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (rel) {
+      if (!rel) return;
+      var apk = (rel.assets || []).filter(function (a) { return /\.apk$/i.test(a.name); })[0];
+      if (apk) document.getElementById("download").href = apk.browser_download_url;
+      var exe = (rel.assets || []).filter(function (a) { return /-setup\.exe$/i.test(a.name); })[0];
+      if (exe) document.getElementById("download-win").href = exe.browser_download_url;
+      var v = (rel.tag_name || "").replace(/^v/, "");
+      if (v) document.getElementById("version").textContent =
+        "Wersja " + v + " · Android 8.0+ · Windows 10/11";
+    })
+    .catch(function () {});
+</script>
+</body>
+</html>
