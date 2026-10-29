@@ -194,7 +194,7 @@ fn version_tuple(v: &str) -> Vec<u64> {
 
 #[tauri::command]
 async fn check_update() -> Result<UpdateInfo, String> {
-    let url = "https://api.github.com/repos/BlackSingularities/MusicTagger/releases/latest";
+    let url = "https://redzikowski.com/api/github/repos/BlackSingularities/MusicTagger/releases/latest";
     let v: serde_json::Value = sources::http::get_json("github", url).await.map_err(|e| e.to_string())?;
     let tag = v.get("tag_name").and_then(|x| x.as_str()).unwrap_or("").to_string();
     let kind = update::install_kind();
@@ -218,7 +218,7 @@ async fn check_update() -> Result<UpdateInfo, String> {
 /// Na Androidzie tylko pobiera APK i zwraca jego ścieżkę – instalację uruchamia interfejs.
 #[tauri::command]
 async fn install_update(app: AppHandle, url: String) -> Result<Option<String>, String> {
-    if !url.starts_with("https://github.com/BlackSingularities/MusicTagger/releases/download/") {
+    if !url.starts_with("https://redzikowski.com/api/projects/musictagger/asset/") {
         return Err("Nieprawidłowy adres aktualizacji".into());
     }
     if update::install_kind() == "android" {
