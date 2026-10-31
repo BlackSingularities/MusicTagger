@@ -731,12 +731,14 @@ html.android .btn.filled.danger { background: #ff3b47; color: #fff; }
 html.android .fab { border-radius: 999px; background: #fff; color: #000; height: 56px; min-width: 56px; justify-content: center; font-weight: 700; }
 
 /* Dolna nawigacja: czarna, aktywna pozycja = biała pigułka z czarną ikoną */
-html.android #navbar { background: #000; height: calc(72px + var(--safe-b)); }
-html.android #navbar .rail-item { padding: 8px 0 10px; color: rgba(255,255,255,.55); }
-html.android #navbar .rail-item .pill { height: 34px; }
-html.android #navbar .rail-item.active { color: #fff; }
-html.android #navbar .rail-item.active .pill { background: #fff; color: #000; }
-html.android #navbar .rail-item .lbl { font-size: 11px; font-weight: 700; }
+/* Styl wspólny dla aplikacji Open: wybrana zakładka to biały kafel z czarną ikoną i podpisem. */
+html.android #navbar { background: #000; height: auto; padding: 4px 6px calc(4px + var(--safe-b)); gap: 4px; }
+html.android #navbar .rail-item { padding: 7px 0 6px; gap: 3px; border-radius: 6px; color: rgba(255,255,255,.7); transition: background .16s, color .16s; }
+html.android #navbar .rail-item .pill { height: 21px; width: 40px; background: transparent !important; color: inherit !important; }
+html.android #navbar .rail-item .pill svg { width: 21px; height: 21px; }
+html.android #navbar .rail-item.active { background: #fff; color: #000; }
+html.android #navbar .rail-item .lbl { font-size: 10px; font-weight: 500; white-space: nowrap; }
+html.android #navbar .rail-item.active .lbl { font-weight: 700; }
 html.android .badge { background: #ff3b47; color: #fff; }
 
 /* Chipy i przełączniki: pigułki */
