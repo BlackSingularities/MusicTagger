@@ -31,7 +31,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
     "publisher": "BlackSingularities",
     "category": "Music",
     "shortDescription": "Otwarty, inteligentny tagger muzyki",
@@ -45,17 +45,15 @@
     ],
     "windows": {
       "nsis": {
-        "installMode": "currentUser",
+        "installMode": "both",
         "languages": [
           "Polish",
           "English"
         ],
+        "customLanguageFiles": {
+          "Polish": "installer/Polish.nsh"
+        },
         "displayLanguageSelector": false
-      },
-      "wix": {
-        "language": [
-          "en-US"
-        ]
       }
     },
     "android": {

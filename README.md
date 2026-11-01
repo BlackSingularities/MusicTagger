@@ -56,9 +56,7 @@ Aplikację buduje automatycznie wypchnięcie tagu wersji (np. `v1.2.3`). Pliki t
 
 | Plik | Platforma |
 |---|---|
-| `OpenMusicTagger_x.y.z_x64-setup.exe` | Windows 10/11, instalator |
-| `OpenMusicTagger_x.y.z_x64.msi` | Windows, MSI |
-| `OpenMusicTagger_x.y.z_portable.exe` | Windows, bez instalacji |
+| `OpenMusicTagger_x.y.z_x64-setup.exe` | Windows 10/11, instalator (dla bieżącego użytkownika lub – z uprawnieniami administratora – dla wszystkich) |
 | `OpenMusicTagger_x.y.z.apk` | Android 8.0+ |
 
 Strona aplikacji: <https://blacksingularities.github.io/MusicTagger/>

@@ -1,3 +1,10 @@
+## 1.2.4 — Installer only
+
+- Windows is now released only as the setup installer; MSI and portable builds are gone. Portable copies update by running the installer.
+- Installer fully translated into Polish (no more empty labels).
+- Install for the current user or, with administrator rights, for all users; updates reuse the previous install location.
+- Android: bottom tab bar in the style of OpenCalc.
+
 ## 1.2.3 — Refreshed icon background
 
 - Warm cream-to-peach background behind the application mark on Android (adaptive, legacy and round), Windows, macOS and iOS icons.

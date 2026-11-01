@@ -43,7 +43,7 @@ jobs:
         run: for f in ui/*.js; do node --check "$f"; done
 
   windows:
-    name: Windows (.exe / .msi)
+    name: Windows (instalator)
     needs: test
     runs-on: windows-latest
     timeout-minutes: 45
@@ -72,8 +72,6 @@ jobs:
         run: |
           mkdir -p dist
           cp src-tauri/target/release/bundle/nsis/*-setup.exe "dist/OpenMusicTagger_${APP_VERSION}_x64-setup.exe"
-          cp src-tauri/target/release/bundle/msi/*.msi "dist/OpenMusicTagger_${APP_VERSION}_x64.msi"
-          cp src-tauri/target/release/open-music-tagger.exe "dist/OpenMusicTagger_${APP_VERSION}_portable.exe"
           ls -la dist
       - uses: actions/upload-artifact@v4
         with:
@@ -169,9 +167,7 @@ jobs:
             echo
             echo "| Plik | Do czego |"
             echo "|---|---|"
-            echo "| \`OpenMusicTagger_${APP_VERSION}_x64-setup.exe\` | Windows – instalator (zalecany) |"
-            echo "| \`OpenMusicTagger_${APP_VERSION}_x64.msi\` | Windows – instalator MSI |"
-            echo "| \`OpenMusicTagger_${APP_VERSION}_portable.exe\` | Windows – wersja bez instalacji (wymaga WebView2) |"
+            echo "| \`OpenMusicTagger_${APP_VERSION}_x64-setup.exe\` | Windows – instalator |"
             echo "| \`OpenMusicTagger_${APP_VERSION}.apk\` | Android 8.0+ |"
           } > notes.md
           cat notes.md
