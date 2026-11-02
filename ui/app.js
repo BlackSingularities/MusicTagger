@@ -1379,7 +1379,7 @@ function renderSettings(v) {
       ${row('OpenMusicTagger ' + S.info.version + (S.info.installKind === 'portable' ? ` (${t('portable')})` : ''), esc(t('aboutD')), `<button class="btn tonal sm has-ic" id="chk-upd">${icon('update')}${esc(t('checkUpdates'))}</button>`)}
       ${row(t('shortcuts'), esc(t('shortcutsD')), '')}
       ${row(t('dataDir'), `<span class="mono selectable">${esc(S.info.dataDir || '')}</span>`, '')}
-      ${row(t('author'), 'Adam Rędzikowski · <a href="#" id="author-link">redzikowski.com</a>', `<button class="btn tonal sm" id="coffee-btn">☕ ${esc(t('coffee'))}</button>`)}</div>
+      ${row(t('author'), 'Adam Rędzikowski · <a href="#" id="author-link">redzikowski.com</a> · <a href="#" id="author-mail">kontakt@redzikowski.com</a>', `<button class="btn tonal sm" id="coffee-btn">☕ ${esc(t('coffee'))}</button>`)}</div>
   </div></div>`;
   const persist = debounce(async () => {
     try { S.settings = await invoke('save_settings', { settings: S.settings }); } catch (e) { snack(errMsg(e), 'bad'); }
@@ -1407,6 +1407,7 @@ function renderSettings(v) {
   $('#acoustid-link').onclick = (e) => { e.preventDefault(); e.stopPropagation(); opener()?.openUrl('https://acoustid.org/new-application'); };
   $('#chk-upd').onclick = () => checkUpdate(false);
   $('#author-link').onclick = (e) => { e.preventDefault(); opener()?.openUrl('https://redzikowski.com'); };
+  $('#author-mail').onclick = (e) => { e.preventDefault(); opener()?.openUrl('mailto:kontakt@redzikowski.com'); };
   $('#coffee-btn').onclick = () => opener()?.openUrl('https://buycoffee.to/adamredzikowski');
 }
 function applyTheme() {
