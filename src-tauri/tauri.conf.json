@@ -45,7 +45,7 @@
     ],
     "windows": {
       "nsis": {
-        "installMode": "both",
+        "installMode": "perMachine",
         "languages": [
           "Polish",
           "English"
