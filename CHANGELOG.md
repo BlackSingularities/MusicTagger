@@ -1,3 +1,7 @@
+## 1.2.6
+
+- No mention of GitHub anywhere in the app: new update server address, error messages without third-party host names.
+
 ## 1.2.5
 
 - The update prompt only says that a new version is available – no change list, links or download source.

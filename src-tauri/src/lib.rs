@@ -194,8 +194,8 @@ fn version_tuple(v: &str) -> Vec<u64> {
 
 #[tauri::command]
 async fn check_update() -> Result<UpdateInfo, String> {
-    let url = "https://redzikowski.com/api/github/repos/BlackSingularities/MusicTagger/releases/latest";
-    let v: serde_json::Value = sources::http::get_json("github", url).await.map_err(|e| e.to_string())?;
+    let url = "https://redzikowski.com/api/releases/repos/BlackSingularities/MusicTagger/releases/latest";
+    let v: serde_json::Value = sources::http::get_json("update", url).await.map_err(|e| e.to_string())?;
     let tag = v.get("tag_name").and_then(|x| x.as_str()).unwrap_or("").to_string();
     let kind = update::install_kind();
     let want = update::asset_suffix(kind);

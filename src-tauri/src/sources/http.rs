@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 pub const USER_AGENT: &str = concat!(
     "OpenMusicTagger/",
     env!("CARGO_PKG_VERSION"),
-    " ( https://github.com/BlackSingularities/MusicTagger )"
+    " ( https://redzikowski.com/portfolio/musictagger )"
 );
 
 pub static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
