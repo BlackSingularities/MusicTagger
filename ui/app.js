@@ -1423,9 +1423,9 @@ async function checkUpdate(silent) {
   try {
     const u = await invoke('check_update');
     if (!u.available) { if (!silent) snack(t('upToDate')); return; }
-    const page = () => opener()?.openUrl(u.download || u.url);
+    const page = () => { if (u.download) opener()?.openUrl(u.download); };
     if (u.canInstall && u.download) snack(t('updateAvail', { v: u.latest }), 'info', { label: t('updateNow'), run: () => installUpdate(u, page) });
-    else snack(t('updateAvail', { v: u.latest }), 'info', { label: t('download'), run: page });
+    else snack(t('updateAvail', { v: u.latest }), 'info');
   } catch (e) { if (!silent) snack(errMsg(e), 'bad'); }
 }
 /** Pobiera i instaluje aktualizację (instalator albo podmiana wersji przenośnej), potem restart. */

@@ -207,8 +207,8 @@ async fn check_update() -> Result<UpdateInfo, String> {
     Ok(UpdateInfo {
         available: version_tuple(&tag) > version_tuple(env!("CARGO_PKG_VERSION")),
         latest: tag,
-        url: v.get("html_url").and_then(|x| x.as_str()).unwrap_or("").into(),
-        notes: v.get("body").and_then(|x| x.as_str()).unwrap_or("").chars().take(2000).collect(),
+        url: String::new(),
+        notes: String::new(),
         can_install: matches!(kind, "portable" | "installed" | "android"),
         download,
     })

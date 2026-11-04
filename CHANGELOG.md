@@ -1,3 +1,7 @@
+## 1.2.5
+
+- The update prompt only says that a new version is available – no change list, links or download source.
+
 ## 1.2.4 — Installer only
 
 - Windows is now released only as the setup installer; MSI and portable builds are gone. Portable copies update by running the installer.
