@@ -24,27 +24,16 @@ if missing:
     xml = re.sub(r"(<application)", "\n    ".join(missing) + "\n\n    \\1", xml, count=1)
 if "requestLegacyExternalStorage" not in xml:
     xml = xml.replace("<application", '<application android:requestLegacyExternalStorage="true"', 1)
-# Udostępnienie pobranego APK systemowemu instalatorowi (aktualizacja w aplikacji).
-if "${applicationId}.updates" not in xml:
-    provider = (
-        '    <provider android:name="androidx.core.content.FileProvider"\n'
-        '        android:authorities="${applicationId}.updates"\n'
-        '        android:exported="false" android:grantUriPermissions="true">\n'
-        '        <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/omt_update_paths" />\n'
-        '    </provider>\n'
-    )
-    xml = xml.replace("</application>", provider + "    </application>", 1)
 manifest.write_text(xml, encoding="utf-8")
-(gen / "res" / "xml").mkdir(parents=True, exist_ok=True)
-(gen / "res" / "xml" / "omt_update_paths.xml").write_text(
-    '<?xml version="1.0" encoding="utf-8"?>\n<paths>\n    <cache-path name="updates" path="updates/" />\n</paths>\n',
-    encoding="utf-8",
-)
 
 acts = list(gen.glob("java/**/MainActivity.kt"))
 if not acts:
     sys.exit("Nie znaleziono MainActivity.kt")
 shutil.copyfile(root / "android" / "MainActivity.kt", acts[0])
+# Aktualizacja w aplikacji (pobieranie + PackageInstaller) – ten sam pakiet co MainActivity.
+pkg = re.search(r"(?m)^package\s+([\w.]+)", acts[0].read_text(encoding="utf-8")).group(1)
+upd = (root / "android" / "AppUpdater.kt").read_text(encoding="utf-8").replace("__PACKAGE__", pkg)
+(acts[0].parent / "AppUpdater.kt").write_text(upd, encoding="utf-8")
 # Ikony aplikacji (wygenerowane przez `tauri icon`).
 icons = root / "src-tauri" / "icons" / "android"
 if icons.is_dir():

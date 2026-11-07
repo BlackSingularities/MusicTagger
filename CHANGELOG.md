@@ -1,3 +1,7 @@
+## 1.2.8
+
+- Android: updates are downloaded inside the app (with progress) and installed through the system package installer – no browser, clear error messages, and the update continues by itself after allowing app installs.
+
 ## 1.2.7
 
 - Android: minimalist start screen – title, a single "Open folder" button and plain lists instead of large tiles.

@@ -1428,30 +1428,43 @@ async function checkUpdate(silent) {
     else snack(t('updateAvail', { v: u.latest }), 'info');
   } catch (e) { if (!silent) snack(errMsg(e), 'bad'); }
 }
-/** Pobiera i instaluje aktualizację (instalator albo podmiana wersji przenośnej), potem restart. */
+/** Pobiera i instaluje aktualizację (instalator albo podmiana wersji przenośnej), potem restart.
+ *  Na Androidzie pobiera i instaluje APK natywnie (window.AppUpdater) – bez przeglądarki. */
 async function installUpdate(u, fallback) {
   if (S.jobs.apply?.running && !(await confirmBox(t('updateNow'), t('updateBusyQ'), t('updateNow')))) return;
+  if (isAndroid()) return androidUpdate(u, fallback);
   snack(t('updating', { v: u.latest }));
   try {
-    const apk = await invoke('install_update', { url: u.download });
-    if (apk) await installApk(apk, u, fallback);
+    await invoke('install_update', { url: u.download });
   } catch (e) {
     snack(`${t('updateFailed')}: ${errMsg(e)}`, 'bad', { label: t('download'), run: fallback });
   }
 }
-/** Android: otwiera systemowy instalator pobranego APK (bez przeglądarki). */
-async function installApk(path, u, fallback) {
-  const r = window.OmtAndroid?.installApk(path);
-  if (r === 'ok') return;
-  if (r === 'permission') {
-    snack(t('updatePerm'), 'info', { label: t('updateNow'), run: () => installApk(path, u, fallback) });
-    return;
-  }
-  if (r === 'signature') {
-    snack(t('updateSig'), 'bad', { label: t('download'), run: fallback });
-    return;
-  }
-  throw new Error(r || t('updateFailed'));
+/** Android: pobranie APK w aplikacji i instalacja przez systemowy PackageInstaller. */
+function androidUpdate(u, fallback) {
+  const A = window.AppUpdater;
+  if (!A) { fallback(); return; }
+  const retry = { label: t('updateNow'), run: () => androidUpdate(u, fallback) };
+  let lastPct = -1;
+  window.__appUpdateEvent = (ev) => {
+    switch (ev.state) {
+      case 'progress': {
+        const pct = ev.p >= 0 ? Math.floor(ev.p * 100) : -1;
+        if (pct === lastPct || (pct >= 0 && pct % 5 && pct !== 100)) return;
+        lastPct = pct;
+        snack(t('updateDownloading', { v: u.latest }) + (pct >= 0 ? ` ${pct}%` : ''));
+        break;
+      }
+      case 'installing': snack(t('updateInstalling', { v: u.latest })); break;
+      case 'cancelled': snack(t('updateCancelled'), 'info', retry); break;
+      case 'signature': snack(t('updateSig'), 'bad', { label: t('download'), run: fallback }); break;
+      case 'error': snack(`${t('updateFailed')}: ${ev.message || ''}`, 'bad', retry); break;
+    }
+  };
+  const r = A.download(u.download);
+  if (r === 'started') snack(t('updateDownloading', { v: u.latest }));
+  else if (r === 'permission') snack(t('updatePerm'), 'info', retry);
+  else if (r !== 'busy') snack(`${t('updateFailed')}: ${r}`, 'bad', retry);
 }
 
 // ═════════════════════════════ Akcje ═════════════════════════════
