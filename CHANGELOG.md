@@ -1,3 +1,7 @@
+## 1.2.7
+
+- Android: minimalist start screen – title, a single "Open folder" button and plain lists instead of large tiles.
+
 ## 1.2.6
 
 - No mention of GitHub anywhere in the app: new update server address, error messages without third-party host names.

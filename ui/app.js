@@ -555,17 +555,17 @@ function renderStart(v) {
 /** Ekran startowy na Androida – układ jak w OpenPDF: nagłówek, duży biały przycisk, kafle, ostatnie. */
 function renderStartMobile(v, recent) {
   document.body.classList.add('m-start');
+  const rec = S.settings.recursive !== false;
   v.innerHTML = `<div class="m-home">
-    <div class="m-brand"><div class="m-logo">${logo()}</div><div class="grow"><h1>OpenMusicTagger</h1><p>${esc(t('libSub'))}</p></div>
-      <button class="ibtn tonal" data-nav="settings" title="${esc(t('nav_settings'))}">${icon('settings')}</button></div>
+    <div class="m-brand"><h1 class="grow">OpenMusicTagger</h1>
+      <button class="ibtn m-flat" data-nav="settings" title="${esc(t('nav_settings'))}">${icon('settings')}</button></div>
     ${!S.storageOk ? `<div class="banner err">${icon('shield', 'lg')}<div class="grow"><b>${esc(t('permTitle'))}</b><div class="t-body-s" style="margin-top:4px">${esc(t('permText'))}</div></div><button class="btn text" data-act="perm-check">${esc(t('permCheck'))}</button></div>` : ''}
-    <button class="m-primary" data-act="open-folder">${icon('folderOpen', 'lg')}<span class="grow"><b>${esc(t('openFolder'))}</b><span>${esc(t('openFolderHintA'))}</span></span></button>
-    <div class="m-tiles">
-      <div class="m-tile" data-act="toggle-recursive">${icon('layers', 'lg')}<span>${esc(t('recursive'))}</span><button class="switch ${S.settings.recursive !== false ? 'on' : ''}" tabindex="-1"></button></div>
-      <div class="m-tile" data-nav="history">${icon('history', 'lg')}<span>${esc(t('nav_history'))}</span></div>
+    <button class="btn filled has-ic m-primary" data-act="open-folder">${icon('folderOpen')}${esc(t('openFolder'))}</button>
+    <div class="m-group">
+      <div class="li-row click" data-act="toggle-recursive">${icon('layers')}<div class="txt"><b>${esc(t('recursive'))}</b></div><button class="switch ${rec ? 'on' : ''}" tabindex="-1"></button></div>
+      <div class="li-row click" data-nav="history">${icon('history')}<div class="txt"><b>${esc(t('nav_history'))}</b></div>${icon('chevronRight', 'dim')}</div>
     </div>
-    <div class="m-label">${recent.length ? esc(t('recent')).toUpperCase() : ''}</div>
-    ${recent.length ? `<div class="m-group">${recent.slice(0, 8).map((f) => `<div class="li-row click" data-open="${esc(f)}">${icon('folder')}<div class="txt"><b class="ellipsis">${esc(baseName(f))}</b><span class="ellipsis">${esc(f)}</span></div>${icon('chevronRight', 'dim')}</div>`).join('')}</div>` : `<p class="m-hint">${esc(t('welcomeText'))}</p>`}
+    ${recent.length ? `<div class="m-label">${esc(t('recent'))}</div><div class="m-group">${recent.slice(0, 8).map((f) => `<div class="li-row click" data-open="${esc(f)}">${icon('folder')}<div class="txt"><b class="ellipsis">${esc(baseName(f))}</b><span class="ellipsis">${esc(f)}</span></div></div>`).join('')}</div>` : `<p class="m-hint">${esc(t('welcomeText'))}</p>`}
   </div>`;
 }
 function renderLibrary(v) {
