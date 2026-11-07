@@ -1,5 +1,6 @@
 import { icon, logo } from './icons.js';
 import { t, setLang, currentLang } from './i18n.js';
+import { initFeedback, openFeedback } from './feedback.js';
 
 // ═════════════════════════════ Most do backendu ═════════════════════════════
 const TAURI = window.__TAURI__;
@@ -8,6 +9,7 @@ const listen = (ev, cb) => (TAURI ? TAURI.event.listen(ev, cb) : window.__MOCK__
 const fileSrc = (p) => (TAURI ? TAURI.core.convertFileSrc(p) : '');
 const dialogApi = () => TAURI?.dialog;
 const opener = () => TAURI?.opener;
+initFeedback({ app: 'musictagger', appName: 'OpenMusicTagger', version: async () => (TAURI?.app ? TAURI.app.getVersion() : S.info?.version || ''), lang: () => currentLang() });
 
 // ═════════════════════════════ Stan ═════════════════════════════
 const S = {
@@ -1379,6 +1381,7 @@ function renderSettings(v) {
       ${row('OpenMusicTagger ' + S.info.version + (S.info.installKind === 'portable' ? ` (${t('portable')})` : ''), esc(t('aboutD')), `<button class="btn tonal sm has-ic" id="chk-upd">${icon('update')}${esc(t('checkUpdates'))}</button>`)}
       ${row(t('shortcuts'), esc(t('shortcutsD')), '')}
       ${row(t('dataDir'), `<span class="mono selectable">${esc(S.info.dataDir || '')}</span>`, '')}
+      ${row(t('feedback'), esc(t('feedbackD')), `<button class="btn tonal sm has-ic" id="feedback-btn">${icon('report')}${esc(t('feedback'))}</button>`)}
       ${row(t('author'), 'Adam Rędzikowski · <a href="#" id="author-link">redzikowski.com</a> · <a href="#" id="author-mail">kontakt@redzikowski.com</a>', `<button class="btn tonal sm" id="coffee-btn">☕ ${esc(t('coffee'))}</button>`)}</div>
   </div></div>`;
   const persist = debounce(async () => {
@@ -1409,6 +1412,7 @@ function renderSettings(v) {
   $('#author-link').onclick = (e) => { e.preventDefault(); opener()?.openUrl('https://redzikowski.com'); };
   $('#author-mail').onclick = (e) => { e.preventDefault(); opener()?.openUrl('mailto:kontakt@redzikowski.com'); };
   $('#coffee-btn').onclick = () => opener()?.openUrl('https://buycoffee.to/adamredzikowski');
+  $('#feedback-btn').onclick = () => openFeedback();
 }
 function applyTheme() {
   let th = S.settings.theme || 'dark';

@@ -1,3 +1,8 @@
+## 1.3.0
+
+- Zgłaszanie błędów i sugestii: nowa pozycja „Zgłoś błąd lub sugestię” – opis trafia prosto do autora przez redzikowski.com, e-mail jest opcjonalny.
+- Po nieoczekiwanym zamknięciu aplikacja przy następnym uruchomieniu proponuje wysłanie raportu o błędzie – tylko za zgodą użytkownika.
+
 ## 1.2.8
 
 - Android: updates are downloaded inside the app (with progress) and installed through the system package installer – no browser, clear error messages, and the update continues by itself after allowing app installs.

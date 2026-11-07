@@ -1,6 +1,6 @@
 [package]
 name = "open-music-tagger"
-version = "1.2.8"
+version = "1.3.0"
 description = "OpenMusicTagger – inteligentne uzupełnianie tagów, okładek i tekstów (z czasami) dla Twojej muzyki"
 authors = ["OpenMusicTagger"]
 license = "MIT"
