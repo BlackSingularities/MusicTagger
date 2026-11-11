@@ -11,13 +11,60 @@
       "title": "Muzyka *w porządku*",
       "lead": "Wskazujesz folder, a aplikacja uzupełnia tagi, okładki i teksty z czasami. Każdą zmianę możesz cofnąć.",
       "shots": [
-        { "src": "../screenshots/android/01-biblioteka.png", "caption": "Biblioteka" },
-        { "src": "../screenshots/android/02-okladki.png", "caption": "Albumy" },
-        { "src": "../screenshots/android/03-tagi.png", "caption": "Tagi" },
-        { "src": "../screenshots/android/04-okladka.png", "caption": "Okładka" }
+        {
+          "src": "../screenshots/android/01-biblioteka.png",
+          "caption": "Biblioteka"
+        },
+        {
+          "src": "../screenshots/android/02-okladki.png",
+          "caption": "Albumy"
+        },
+        {
+          "src": "../screenshots/android/03-tagi.png",
+          "caption": "Tagi"
+        },
+        {
+          "src": "../screenshots/android/04-okladka.png",
+          "caption": "Okładka"
+        }
       ],
-      "features": ["rozpoznawanie po dźwięku", "okładki do 1400 px", "teksty LRC w pliku", "cofanie zmian", "raport CSV"],
+      "features": [
+        "rozpoznawanie po dźwięku",
+        "okładki do 1400 px",
+        "teksty LRC w pliku",
+        "cofanie zmian",
+        "raport CSV"
+      ],
       "meta": "Android 8 lub nowszy"
+    },
+    {
+      "platform": "windows",
+      "file": "windows.png",
+      "title": "Muzyka *w porządku*",
+      "lead": "Wskazujesz folder, a program pokazuje, czego brakuje, i uzupełnia tagi, okładki oraz teksty z czasami. Ty tylko zatwierdzasz.",
+      "shots": [
+        {
+          "src": "../screenshots/windows/01-biblioteka.png",
+          "caption": "Biblioteka i edytor tagów"
+        },
+        {
+          "src": "../screenshots/windows/02-okladka.png",
+          "caption": "Okładka w pliku"
+        },
+        {
+          "src": "../screenshots/windows/03-braki.png",
+          "caption": "Braki na pierwszy rzut oka"
+        }
+      ],
+      "features": [
+        "rozpoznawanie po dźwięku",
+        "okładki do 1400 px",
+        "teksty LRC w pliku",
+        "edycja wielu plików",
+        "cofanie zmian",
+        "raport CSV"
+      ],
+      "meta": "Windows 10 i 11"
     }
   ]
 }

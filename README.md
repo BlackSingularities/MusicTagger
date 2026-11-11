@@ -2,7 +2,8 @@
 
 <!-- posters:start -->
 <p align="center">
-  <img src="docs/posters/android.png" alt="OpenMusicTagger – Android" width="460">
+  <img src="docs/posters/android.png" alt="OpenMusicTagger – Android" width="400">
+  <img src="docs/posters/windows.png" alt="OpenMusicTagger – Windows" width="400">
 </p>
 
 <p align="center"><a href="https://redzikowski.com/portfolio/musictagger">redzikowski.com/portfolio/musictagger</a></p>
