@@ -1,5 +1,13 @@
 # OpenMusicTagger
 
+<!-- posters:start -->
+<p align="center">
+  <img src="docs/posters/android.png" alt="OpenMusicTagger – Android" width="460">
+</p>
+
+<p align="center"><a href="https://redzikowski.com/portfolio/musictagger">redzikowski.com/portfolio/musictagger</a></p>
+<!-- posters:end -->
+
 Aplikacja na **Windows** i **Androida** (Rust + Tauri 2), która skanuje folder z muzyką i automatycznie uzupełnia:
 
 - **brakujące tagi**: tytuł, wykonawca, album, wykonawca albumu, rok, numer utworu i płyty, gatunek, wytwórnia, ISRC, BPM, identyfikatory MusicBrainz,
